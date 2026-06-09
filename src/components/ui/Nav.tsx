@@ -1,0 +1,271 @@
+"use client";
+
+import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useAuth } from "@/features/auth/AuthContext";
+import { Avatar } from "./Avatar";
+import { cn } from "@/lib/utils";
+import {
+  Bell,
+  GearSix,
+  SignOut,
+  List,
+  X,
+  MagnifyingGlass,
+  MaskHappy,
+  UserCircle,
+  CaretDown,
+} from "@phosphor-icons/react";
+
+/* ============================================================
+   Nav — responsive top nav for a mobile-friendly website
+
+   Desktop: logo · centered links · bell · avatar dropdown
+   Mobile:  logo · bell · hamburger → slide-out menu
+   ============================================================ */
+
+export function Nav() {
+  const { user, activeRole, logout } = useAuth();
+  const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [avatarOpen, setAvatarOpen] = useState(false);
+  const avatarRef = useRef<HTMLDivElement>(null);
+
+  // Close avatar dropdown on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (avatarRef.current && !avatarRef.current.contains(e.target as Node)) {
+        setAvatarOpen(false);
+      }
+    }
+    if (avatarOpen) {
+      document.addEventListener("mousedown", handleClick);
+      return () => document.removeEventListener("mousedown", handleClick);
+    }
+  }, [avatarOpen]);
+
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  const actorLinks = [
+    { href: "/discover", label: "Discover", icon: MagnifyingGlass },
+    { href: "/my-shows", label: "My Shows", icon: MaskHappy },
+    { href: "/notifications", label: "Notifications", icon: Bell },
+    { href: "/profile", label: "Profile", icon: UserCircle },
+  ];
+
+  const teamLinks = activeRole.type === "team"
+    ? [
+        { href: "/shows", label: "My Shows", icon: MaskHappy },
+        { href: `/shows/${activeRole.showId}/auditions`, label: "Auditions", icon: MagnifyingGlass },
+        { href: `/shows/${activeRole.showId}/callbacks`, label: "Callbacks", icon: Bell },
+        { href: `/shows/${activeRole.showId}/casting`, label: "Casting", icon: UserCircle },
+        { href: `/shows/${activeRole.showId}/cast-list`, label: "Cast List", icon: MaskHappy },
+      ]
+    : [];
+
+  const links = activeRole.type === "actor" ? actorLinks : teamLinks;
+
+  const isActive = (href: string) => {
+    if (href === "/discover") return pathname === "/discover" || pathname?.startsWith("/auditions/");
+    return pathname?.startsWith(href);
+  };
+
+  // Count for notification badge
+  const hasNotifications = true; // TODO: derive from real data
+
+  return (
+    <>
+      <nav className="bg-curtain-900 text-white sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <div className="flex items-center justify-between h-14">
+            {/* Left: Logo */}
+            <Link href="/" className="flex items-center gap-2.5 flex-shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-stage-500 flex items-center justify-center">
+                <span className="text-curtain-900 font-display text-base font-bold">
+                  O
+                </span>
+              </div>
+              <span className="text-base font-display text-white">
+                Overture
+              </span>
+            </Link>
+
+            {/* Center: Desktop nav links */}
+            <div className="hidden md:flex items-center gap-1">
+              {links.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={cn(
+                    "px-3 py-1.5 text-sm font-medium rounded-lg transition",
+                    isActive(link.href)
+                      ? "text-white bg-curtain-800"
+                      : "text-curtain-300 hover:text-white hover:bg-curtain-800"
+                  )}
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </div>
+
+            {/* Right: Desktop actions */}
+            <div className="flex items-center gap-2">
+              {/* Notification bell — always visible */}
+              <Link
+                href="/notifications"
+                className={cn(
+                  "p-2 rounded-lg transition relative",
+                  isActive("/notifications")
+                    ? "text-white bg-curtain-800"
+                    : "text-curtain-300 hover:text-white hover:bg-curtain-800"
+                )}
+              >
+                <Bell className="w-5 h-5" weight={isActive("/notifications") ? "fill" : "bold"} />
+                {hasNotifications && (
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-ruby-500 rounded-full" />
+                )}
+              </Link>
+
+              {/* Avatar dropdown — desktop */}
+              {user && (
+                <div className="relative hidden md:block" ref={avatarRef}>
+                  <button
+                    onClick={() => setAvatarOpen(!avatarOpen)}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-curtain-300 hover:text-white hover:bg-curtain-800 transition"
+                  >
+                    <Avatar
+                      name={user.displayName}
+                      imageUrl={user.avatarUrl}
+                      size="xs"
+                      className="bg-curtain-700 text-white"
+                    />
+                    <span className="text-sm font-medium hidden lg:inline">
+                      {user.displayName}
+                    </span>
+                    <CaretDown className="w-3 h-3" weight="bold" />
+                  </button>
+
+                  {/* Dropdown */}
+                  {avatarOpen && (
+                    <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-xl shadow-lg border border-cream-200 py-1 z-50">
+                      <Link
+                        href="/profile"
+                        className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-800 hover:bg-cream-50 transition"
+                        onClick={() => setAvatarOpen(false)}
+                      >
+                        <UserCircle className="w-4 h-4 text-stage-500" weight="duotone" />
+                        My Profile
+                      </Link>
+                      <hr className="border-cream-100 my-1" />
+                      <button
+                        onClick={() => {
+                          setAvatarOpen(false);
+                          logout();
+                        }}
+                        className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-800 hover:bg-cream-50 transition w-full text-left"
+                      >
+                        <SignOut className="w-4 h-4 text-clay-400" weight="bold" />
+                        Sign Out
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Hamburger — mobile only */}
+              <button
+                onClick={() => setMobileOpen(!mobileOpen)}
+                className="p-2 rounded-lg text-curtain-300 hover:text-white hover:bg-curtain-800 transition md:hidden"
+                aria-label={mobileOpen ? "Close menu" : "Open menu"}
+              >
+                {mobileOpen ? (
+                  <X className="w-5 h-5" weight="bold" />
+                ) : (
+                  <List className="w-5 h-5" weight="bold" />
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      {/* Mobile slide-down menu */}
+      {mobileOpen && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/40 z-20 md:hidden"
+            onClick={() => setMobileOpen(false)}
+          />
+
+          {/* Menu panel */}
+          <div className="fixed top-14 left-0 right-0 bg-curtain-900 z-25 md:hidden border-t border-curtain-800 animate-fade-up shadow-xl">
+            <div className="px-4 py-3 flex flex-col gap-1">
+              {links.map((link) => {
+                const Icon = link.icon;
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition",
+                      isActive(link.href)
+                        ? "text-white bg-curtain-800"
+                        : "text-curtain-300 hover:text-white hover:bg-curtain-800"
+                    )}
+                  >
+                    <Icon
+                      className="w-5 h-5"
+                      weight={isActive(link.href) ? "fill" : "duotone"}
+                    />
+                    {link.label}
+                    {link.href === "/notifications" && hasNotifications && (
+                      <span className="w-2 h-2 bg-ruby-500 rounded-full ml-auto" />
+                    )}
+                  </Link>
+                );
+              })}
+
+              {/* User section */}
+              {user && (
+                <>
+                  <hr className="border-curtain-800 my-2" />
+                  <div className="flex items-center gap-3 px-3 py-2">
+                    <Avatar
+                      name={user.displayName}
+                      imageUrl={user.avatarUrl}
+                      size="sm"
+                      className="bg-curtain-700 text-white"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-white truncate">
+                        {user.displayName}
+                      </p>
+                      <p className="text-xs text-curtain-400 truncate">
+                        {user.email}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setMobileOpen(false);
+                      logout();
+                    }}
+                    className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-curtain-400 hover:text-white hover:bg-curtain-800 transition"
+                  >
+                    <SignOut className="w-5 h-5" weight="bold" />
+                    Sign Out
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}

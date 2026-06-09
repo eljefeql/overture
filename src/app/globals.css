@@ -1,26 +1,259 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* ============================================================
+   OVERTURE DESIGN SYSTEM — Tailwind v4 Theme
+   ============================================================ */
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* --- Curtain (Primary Plum) --- */
+  --color-curtain-50: #faf0f5;
+  --color-curtain-100: #f2dce9;
+  --color-curtain-200: #e0b5d4;
+  --color-curtain-300: #c882b4;
+  --color-curtain-400: #a85694;
+  --color-curtain-500: #8a3873;
+  --color-curtain-600: #6e2a5c;
+  --color-curtain-700: #551f48;
+  --color-curtain-800: #3d1a35;
+  --color-curtain-900: #2a1225;
+
+  /* --- Stage (Accent Gold) --- */
+  --color-stage-50: #fcf8ee;
+  --color-stage-100: #f7efd6;
+  --color-stage-200: #eedcad;
+  --color-stage-300: #e2c685;
+  --color-stage-400: #d4ad5e;
+  --color-stage-500: #c4953a;
+  --color-stage-600: #a07620;
+  --color-stage-700: #7a5c16;
+  --color-stage-800: #5c440f;
+  --color-stage-900: #33260a;
+
+  /* --- Cream (Neutral Warm) --- */
+  --color-cream-50: #fefcf9;
+  --color-cream-100: #faf7f2;
+  --color-cream-200: #f5f0e8;
+  --color-cream-300: #ebe4d8;
+  --color-cream-400: #d4cbbf;
+  --color-cream-500: #b0a898;
+  --color-cream-600: #8a8275;
+
+  /* --- Forest (Positive Green) --- */
+  --color-forest-50: #f0faf4;
+  --color-forest-100: #d8f3dc;
+  --color-forest-200: #b7e4c7;
+  --color-forest-400: #74c69d;
+  --color-forest-500: #52b788;
+  --color-forest-600: #40916c;
+  --color-forest-700: #2d6a4f;
+
+  /* --- Ruby (Negative Warm Red) --- */
+  --color-ruby-50: #fef2f4;
+  --color-ruby-100: #fde6ea;
+  --color-ruby-200: #f9c4cd;
+  --color-ruby-400: #e05670;
+  --color-ruby-500: #c4314b;
+  --color-ruby-600: #a82940;
+  --color-ruby-700: #8c2236;
+
+  /* --- Clay (Warm Gray) --- */
+  --color-clay-50: #faf9f7;
+  --color-clay-100: #f0eeea;
+  --color-clay-200: #e2ded8;
+  --color-clay-300: #c9c3ba;
+  --color-clay-400: #a39d94;
+  --color-clay-500: #7d786f;
+  --color-clay-600: #5c5750;
+  --color-clay-700: #3d3935;
+
+  /* --- Typography --- */
+  --font-display: "DM Serif Display", Georgia, serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  /* --- Spacing tokens --- */
+  --spacing-section: 2.5rem;
+  --spacing-group: 1.5rem;
+  --spacing-element: 0.75rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ============================================================
+   BASE STYLES
+   ============================================================ */
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--color-cream-50);
+  color: var(--color-curtain-900);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================================
+   CUSTOM SCROLLBAR
+   ============================================================ */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-curtain-200);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-curtain-300);
+}
+
+/* ============================================================
+   ANIMATIONS
+   ============================================================ */
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-out-right {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes pulse-gold {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(196, 149, 58, 0.3); }
+  50% { box-shadow: 0 0 0 6px rgba(196, 149, 58, 0); }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.4s ease-out both;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.animate-slide-out-right {
+  animation: slide-out-right 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.animate-scale-in {
+  animation: scale-in 0.2s ease-out both;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* Stagger delays for panel content */
+.stagger-1 { animation-delay: 50ms; }
+.stagger-2 { animation-delay: 100ms; }
+.stagger-3 { animation-delay: 150ms; }
+.stagger-4 { animation-delay: 200ms; }
+
+/* ============================================================
+   THE GOLD LINE — signature divider
+   ============================================================ */
+
+.gold-line {
+  border: none;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--color-stage-300) 30%,
+    var(--color-stage-300) 70%,
+    transparent
+  );
+  margin: 1.5rem auto;
+  width: 40%;
+}
+
+/* ============================================================
+   SKELETON LOADING
+   ============================================================ */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-cream-200) 25%,
+    var(--color-cream-100) 50%,
+    var(--color-cream-200) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 0.5rem;
+}
+
+/* ── Print Styles ── */
+@media print {
+  /* Hide nav, badges, buttons */
+  nav, header,
+  .print\\:hidden,
+  [class*="ProductionTopNav"],
+  [class*="ProductionSubNav"],
+  [class*="bg-curtain-900"],
+  [class*="bg-curtain-800"] {
+    display: none !important;
+  }
+
+  body {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Clean up margins */
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
 }
