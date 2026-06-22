@@ -2,8 +2,11 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/features/auth/AuthContext";
+import { useOrg } from "@/features/auth/useOrg";
+import { getNotifications } from "@/lib/api/client";
 import { Avatar } from "./Avatar";
 import { cn } from "@/lib/utils";
 import {
@@ -16,6 +19,7 @@ import {
   MaskHappy,
   UserCircle,
   CaretDown,
+  Buildings,
 } from "@phosphor-icons/react";
 
 /* ============================================================
@@ -27,10 +31,19 @@ import {
 
 export function Nav() {
   const { user, activeRole, logout } = useAuth();
+  const { org } = useOrg();
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [avatarOpen, setAvatarOpen] = useState(false);
   const avatarRef = useRef<HTMLDivElement>(null);
+
+  function handleSignOut() {
+    setAvatarOpen(false);
+    setMobileOpen(false);
+    logout();
+    router.push("/");
+  }
 
   // Close avatar dropdown on outside click
   useEffect(() => {
@@ -50,10 +63,11 @@ export function Nav() {
     setMobileOpen(false);
   }, [pathname]);
 
+  // Notifications intentionally absent — the bell icon (with unread badge)
+  // is the single entry point to /notifications.
   const actorLinks = [
     { href: "/discover", label: "Discover", icon: MagnifyingGlass },
     { href: "/my-shows", label: "My Shows", icon: MaskHappy },
-    { href: "/notifications", label: "Notifications", icon: Bell },
     { href: "/profile", label: "Profile", icon: UserCircle },
   ];
 
@@ -74,8 +88,13 @@ export function Nav() {
     return pathname?.startsWith(href);
   };
 
-  // Count for notification badge
-  const hasNotifications = true; // TODO: derive from real data
+  // Unread notification badge — derived from real data
+  const { data: notifications } = useQuery({
+    queryKey: ["notifications", user?.id],
+    queryFn: () => getNotifications(user!.id),
+    enabled: !!user,
+  });
+  const hasNotifications = notifications?.some((n) => !n.isRead) ?? false;
 
   return (
     <>
@@ -94,41 +113,63 @@ export function Nav() {
               </span>
             </Link>
 
-            {/* Center: Desktop nav links */}
-            <div className="hidden md:flex items-center gap-1">
-              {links.map((link) => (
+            {/* Center: Desktop nav links — logged-in only */}
+            {user && (
+              <div className="hidden md:flex items-center gap-1">
+                {links.map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={cn(
+                      "px-3 py-1.5 text-sm font-medium rounded-lg transition",
+                      isActive(link.href)
+                        ? "text-white bg-curtain-800"
+                        : "text-curtain-300 hover:text-white hover:bg-curtain-800"
+                    )}
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+
+            {/* Right: actions */}
+            <div className="flex items-center gap-2">
+              {/* Logged-out: Sign in / Sign up */}
+              {!user && (
+                <>
+                  <Link
+                    href="/login"
+                    className="px-3 py-1.5 text-sm font-medium rounded-lg text-curtain-300 hover:text-white hover:bg-curtain-800 transition"
+                  >
+                    Sign in
+                  </Link>
+                  <Link
+                    href="/signup"
+                    className="px-3.5 py-1.5 text-sm font-semibold rounded-lg bg-stage-500 text-curtain-900 hover:bg-stage-400 transition"
+                  >
+                    Sign up
+                  </Link>
+                </>
+              )}
+
+              {/* Notification bell — logged-in only */}
+              {user && (
                 <Link
-                  key={link.href}
-                  href={link.href}
+                  href="/notifications"
                   className={cn(
-                    "px-3 py-1.5 text-sm font-medium rounded-lg transition",
-                    isActive(link.href)
+                    "p-2 rounded-lg transition relative",
+                    isActive("/notifications")
                       ? "text-white bg-curtain-800"
                       : "text-curtain-300 hover:text-white hover:bg-curtain-800"
                   )}
                 >
-                  {link.label}
+                  <Bell className="w-5 h-5" weight={isActive("/notifications") ? "fill" : "bold"} />
+                  {hasNotifications && (
+                    <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-ruby-500 rounded-full" />
+                  )}
                 </Link>
-              ))}
-            </div>
-
-            {/* Right: Desktop actions */}
-            <div className="flex items-center gap-2">
-              {/* Notification bell — always visible */}
-              <Link
-                href="/notifications"
-                className={cn(
-                  "p-2 rounded-lg transition relative",
-                  isActive("/notifications")
-                    ? "text-white bg-curtain-800"
-                    : "text-curtain-300 hover:text-white hover:bg-curtain-800"
-                )}
-              >
-                <Bell className="w-5 h-5" weight={isActive("/notifications") ? "fill" : "bold"} />
-                {hasNotifications && (
-                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-ruby-500 rounded-full" />
-                )}
-              </Link>
+              )}
 
               {/* Avatar dropdown — desktop */}
               {user && (
@@ -160,12 +201,19 @@ export function Nav() {
                         <UserCircle className="w-4 h-4 text-stage-500" weight="duotone" />
                         My Profile
                       </Link>
+                      {org && (
+                        <Link
+                          href="/org"
+                          className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-800 hover:bg-cream-50 transition"
+                          onClick={() => setAvatarOpen(false)}
+                        >
+                          <Buildings className="w-4 h-4 text-stage-500" weight="duotone" />
+                          {org.name}
+                        </Link>
+                      )}
                       <hr className="border-cream-100 my-1" />
                       <button
-                        onClick={() => {
-                          setAvatarOpen(false);
-                          logout();
-                        }}
+                        onClick={handleSignOut}
                         className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-800 hover:bg-cream-50 transition w-full text-left"
                       >
                         <SignOut className="w-4 h-4 text-clay-400" weight="bold" />
@@ -176,18 +224,20 @@ export function Nav() {
                 </div>
               )}
 
-              {/* Hamburger — mobile only */}
-              <button
-                onClick={() => setMobileOpen(!mobileOpen)}
-                className="p-2 rounded-lg text-curtain-300 hover:text-white hover:bg-curtain-800 transition md:hidden"
-                aria-label={mobileOpen ? "Close menu" : "Open menu"}
-              >
-                {mobileOpen ? (
-                  <X className="w-5 h-5" weight="bold" />
-                ) : (
-                  <List className="w-5 h-5" weight="bold" />
-                )}
-              </button>
+              {/* Hamburger — mobile, logged-in only (logged-out shows inline Sign in/up) */}
+              {user && (
+                <button
+                  onClick={() => setMobileOpen(!mobileOpen)}
+                  className="p-2 rounded-lg text-curtain-300 hover:text-white hover:bg-curtain-800 transition md:hidden"
+                  aria-label={mobileOpen ? "Close menu" : "Open menu"}
+                >
+                  {mobileOpen ? (
+                    <X className="w-5 h-5" weight="bold" />
+                  ) : (
+                    <List className="w-5 h-5" weight="bold" />
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -250,11 +300,17 @@ export function Nav() {
                       </p>
                     </div>
                   </div>
+                  {org && (
+                    <Link
+                      href="/org"
+                      className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-curtain-300 hover:text-white hover:bg-curtain-800 transition"
+                    >
+                      <Buildings className="w-5 h-5" weight="duotone" />
+                      {org.name}
+                    </Link>
+                  )}
                   <button
-                    onClick={() => {
-                      setMobileOpen(false);
-                      logout();
-                    }}
+                    onClick={handleSignOut}
                     className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-curtain-400 hover:text-white hover:bg-curtain-800 transition"
                   >
                     <SignOut className="w-5 h-5" weight="bold" />

@@ -20,7 +20,86 @@ export type Org = {
   city: string | null;
   state: string | null;
   websiteUrl: string | null;
+  codeOfConduct: string | null;
+  // Theatre profile depth (Sprint D, Phase 2)
+  foundedYear: number | null;
+  mission: string | null;
+  facebookUrl: string | null;
+  instagramUrl: string | null;
+  ticketingUrl: string | null;
 } & Timestamps;
+
+/** What a space is used for — labels & groups spaces on the public page. */
+export type SpaceType = "performance" | "rehearsal" | "other";
+
+/** A space belonging to a theatre (performance, rehearsal, or other). */
+export type Venue = {
+  id: ID;
+  orgId: ID;
+  name: string;
+  address: string | null;
+  capacity: number | null;
+  accessibilityNotes: string | null;
+  parkingNotes: string | null;
+  isPrimary: boolean;
+  spaceType: SpaceType;
+  sortOrder: number;
+  createdAt: string;
+};
+
+/**
+ * A manually-entered past production — a theatre's history that predates
+ * Overture. Merged with auto-derived past shows on the public theatre page.
+ */
+export type OrgPastProduction = {
+  id: ID;
+  orgId: ID;
+  title: string;
+  year: number | null;
+  notes: string | null;
+  sortOrder: number;
+  createdAt: string;
+};
+
+/** A public "key person" — leadership display entry (may have no app account). */
+export type OrgLeader = {
+  id: ID;
+  orgId: ID;
+  name: string;
+  title: string | null;
+  photoUrl: string | null;
+  sortOrder: number;
+  createdAt: string;
+};
+
+/** A venue or production photo in a theatre's gallery. */
+export type OrgPhoto = {
+  id: ID;
+  orgId: ID;
+  storagePath: string;
+  caption: string | null;
+  kind: "venue" | "production";
+  sortOrder: number;
+  createdAt: string;
+  publicUrl: string;
+};
+
+/**
+ * Theatre-level membership — distinct from ShowTeamMember (show-scoped).
+ * owner/admin: manage theatre, create shows, see all shows.
+ * member: view-only at org level; show access comes from ShowTeamMember.
+ */
+export type OrgMember = {
+  id: ID;
+  orgId: ID;
+  userId: ID | null; // null until the invite is accepted
+  name: string;
+  email: string;
+  role: "owner" | "admin" | "member";
+  status: "active" | "invited";
+  invitedAt: string;
+  joinedAt: string | null;
+};
 
 export type ShowType = "musical" | "play" | "revue";
 
@@ -48,6 +127,7 @@ export type Show = {
   performanceLocation: string | null;
   callbackContactName: string | null;
   callbackContactPhone: string | null;
+  posterUrl: string | null;
   city: string;
   state: string;
   distanceMiles: number | null;

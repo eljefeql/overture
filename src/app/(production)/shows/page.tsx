@@ -3,8 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@/features/auth/AuthContext";
-import { getShows, getOrg } from "@/lib/api/client";
+import { useOrg } from "@/features/auth/useOrg";
+import { getShows } from "@/lib/api/client";
 import {
   Card,
   Badge,
@@ -57,22 +57,18 @@ const STATUS_FILTERS: { value: ShowStatus | "all"; label: string }[] = [
 ];
 
 export default function ShowsListPage() {
-  const { activeRole } = useAuth();
-  const orgId = activeRole.type === "org" ? activeRole.orgId : "org-1";
+  const { org, isLoading: orgLoading } = useOrg();
+  const orgId = org?.id;
 
   const [filter, setFilter] = useState<ShowStatus | "all">("all");
 
   const { data: shows, isLoading } = useQuery({
     queryKey: ["shows", orgId],
-    queryFn: () => getShows({ orgId }),
+    queryFn: () => getShows({ orgId: orgId! }),
+    enabled: !!orgId,
   });
 
-  const { data: org } = useQuery({
-    queryKey: ["org", orgId],
-    queryFn: () => getOrg(orgId),
-  });
-
-  if (isLoading) return <PageSkeleton />;
+  if (orgLoading || isLoading) return <PageSkeleton />;
 
   const filtered = filter === "all"
     ? shows

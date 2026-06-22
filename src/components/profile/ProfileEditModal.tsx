@@ -4,8 +4,8 @@ import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Modal, Input, Textarea, Button, useToast } from "@/components/ui";
 import { updateActorProfile, updateActorUser } from "@/lib/api/client";
-import { FloppyDisk } from "@phosphor-icons/react";
-import type { ActorWithProfile, ActorProfile, UnionStatus, Pronouns, ActorMeasurements } from "@/types";
+import { FloppyDisk, Plus, X } from "@phosphor-icons/react";
+import type { ActorWithProfile, ActorProfile, Pronouns, ActorMeasurements, BucketListShow } from "@/types";
 
 type Props = {
   actor: ActorWithProfile;
@@ -14,12 +14,12 @@ type Props = {
   initialTab?: EditSection;
 };
 
-type EditSection = "basic" | "about" | "contact" | "measurements";
+type EditSection = "basic" | "about" | "private" | "measurements";
 
 const SECTIONS: { id: EditSection; label: string }[] = [
   { id: "basic", label: "Basic Info" },
   { id: "about", label: "About" },
-  { id: "contact", label: "Contact" },
+  { id: "private", label: "Private" },
   { id: "measurements", label: "Measurements" },
 ];
 
@@ -33,20 +33,12 @@ const PRONOUN_OPTIONS: { value: Pronouns; label: string }[] = [
   { value: "prefer not to say", label: "Prefer not to say" },
 ];
 
-const UNION_OPTIONS: { value: UnionStatus; label: string }[] = [
-  { value: "non_union", label: "Non-Union" },
-  { value: "aea", label: "AEA" },
-  { value: "sag_aftra", label: "SAG-AFTRA" },
-  { value: "aea_sag", label: "AEA / SAG-AFTRA" },
-];
-
 export function ProfileEditModal({ actor, open, onClose, initialTab = "basic" }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const profile = actor.profile;
   const [activeSection, setActiveSection] = useState<EditSection>(initialTab);
 
-  // Reset section when modal opens
   useEffect(() => {
     if (open) setActiveSection(initialTab);
   }, [open, initialTab]);
@@ -60,20 +52,24 @@ export function ProfileEditModal({ actor, open, onClose, initialTab = "basic" }:
   const [vocalRange, setVocalRange] = useState(profile?.vocalRange ?? "");
   const [danceStyles, setDanceStyles] = useState(profile?.danceStyles?.join(", ") ?? "");
   const [specialSkills, setSpecialSkills] = useState(profile?.specialSkills?.join(", ") ?? "");
-  const [unionStatus, setUnionStatus] = useState<UnionStatus>(profile?.unionStatus ?? "non_union");
   const [locationCity, setLocationCity] = useState(profile?.locationCity ?? "");
   const [locationState, setLocationState] = useState(profile?.locationState ?? "");
   const [travelRadius, setTravelRadius] = useState(profile?.travelRadius?.toString() ?? "");
 
   // ── About state ──
   const [bio, setBio] = useState(profile?.bio ?? "");
+  const [bucketListShows, setBucketListShows] = useState<BucketListShow[]>(
+    profile?.bucketListShows ?? []
+  );
 
-  // ── Contact state ──
+  // ── Private state ──
   const [phone, setPhone] = useState(profile?.phone ?? "");
-  const [addressLine1, setAddressLine1] = useState(profile?.addressLine1 ?? "");
-  const [addressCity, setAddressCity] = useState(profile?.addressCity ?? "");
-  const [addressState, setAddressState] = useState(profile?.addressState ?? "");
-  const [addressZip, setAddressZip] = useState(profile?.addressZip ?? "");
+  const [appearanceDescription, setAppearanceDescription] = useState(profile?.appearanceDescription ?? "");
+  const [accessibilityNeeds, setAccessibilityNeeds] = useState(profile?.accessibilityNeeds ?? "");
+  const [dealbreakers, setDealbreakers] = useState(profile?.dealbreakers?.join(", ") ?? "");
+  const [guardianName, setGuardianName] = useState(profile?.guardianName ?? "");
+  const [guardianEmail, setGuardianEmail] = useState(profile?.guardianEmail ?? "");
+  const [guardianPhone, setGuardianPhone] = useState(profile?.guardianPhone ?? "");
 
   // ── Measurements state ──
   const m = profile?.measurements;
@@ -104,15 +100,17 @@ export function ProfileEditModal({ actor, open, onClose, initialTab = "basic" }:
     setVocalRange(profile?.vocalRange ?? "");
     setDanceStyles(profile?.danceStyles?.join(", ") ?? "");
     setSpecialSkills(profile?.specialSkills?.join(", ") ?? "");
-    setUnionStatus(profile?.unionStatus ?? "non_union");
     setLocationCity(profile?.locationCity ?? "");
     setLocationState(profile?.locationState ?? "");
     setTravelRadius(profile?.travelRadius?.toString() ?? "");
     setPhone(profile?.phone ?? "");
-    setAddressLine1(profile?.addressLine1 ?? "");
-    setAddressCity(profile?.addressCity ?? "");
-    setAddressState(profile?.addressState ?? "");
-    setAddressZip(profile?.addressZip ?? "");
+    setAppearanceDescription(profile?.appearanceDescription ?? "");
+    setBucketListShows(profile?.bucketListShows ?? []);
+    setAccessibilityNeeds(profile?.accessibilityNeeds ?? "");
+    setDealbreakers(profile?.dealbreakers?.join(", ") ?? "");
+    setGuardianName(profile?.guardianName ?? "");
+    setGuardianEmail(profile?.guardianEmail ?? "");
+    setGuardianPhone(profile?.guardianPhone ?? "");
     const ms = profile?.measurements;
     setHeadInches(ms?.headInches?.toString() ?? "");
     setNeckInches(ms?.neckInches?.toString() ?? "");
@@ -129,6 +127,22 @@ export function ProfileEditModal({ actor, open, onClose, initialTab = "basic" }:
     setHatSize(ms?.hatSize ?? "");
     setJacketDressSize(ms?.jacketDressSize ?? "");
   }, [actor, profile, open]);
+
+  // Bucket list helpers
+  function addBucketListShow() {
+    if (bucketListShows.length >= 5) return;
+    setBucketListShows([...bucketListShows, { title: "", role: null }]);
+  }
+
+  function updateBucketListShow(index: number, field: "title" | "role", value: string) {
+    const updated = [...bucketListShows];
+    updated[index] = { ...updated[index], [field]: value || null };
+    setBucketListShows(updated);
+  }
+
+  function removeBucketListShow(index: number) {
+    setBucketListShows(bucketListShows.filter((_, i) => i !== index));
+  }
 
   // Mutations
   const userMutation = useMutation({
@@ -147,36 +161,37 @@ export function ProfileEditModal({ actor, open, onClose, initialTab = "basic" }:
 
   async function handleSave() {
     try {
-      // Parse helper
       const num = (v: string) => (v.trim() ? parseFloat(v) : null);
       const csvToArray = (v: string) =>
         v.split(",").map((s) => s.trim()).filter(Boolean);
 
-      // Always update user-level fields
       await userMutation.mutateAsync({ displayName, pronouns: (pronouns as Pronouns) || null });
 
-      // Build profile updates from ALL sections (state persists across tabs)
+      const cleanedBucketList = bucketListShows.filter((s) => s.title.trim());
+
       const profileUpdates: Partial<ActorProfile> = {
-        // Basic Info
         ageRangeLow: num(ageRangeLow) as number | null,
         ageRangeHigh: num(ageRangeHigh) as number | null,
         heightInches: num(heightInches) as number | null,
         vocalRange: vocalRange || null,
         danceStyles: csvToArray(danceStyles),
         specialSkills: csvToArray(specialSkills),
-        unionStatus,
         locationCity: locationCity || null,
         locationState: locationState || null,
         travelRadius: num(travelRadius) as number | null,
-        // About
         bio,
-        // Contact
+        bucketListShows: cleanedBucketList,
         phone: phone || null,
-        addressLine1: addressLine1 || null,
-        addressCity: addressCity || null,
-        addressState: addressState || null,
-        addressZip: addressZip || null,
-        // Measurements
+        appearanceDescription: appearanceDescription || null,
+        accessibilityNeeds: accessibilityNeeds || null,
+        dealbreakers: csvToArray(dealbreakers),
+        ...(profile?.isMinor
+          ? {
+              guardianName: guardianName || null,
+              guardianEmail: guardianEmail || null,
+              guardianPhone: guardianPhone || null,
+            }
+          : {}),
         measurements: {
           headInches: num(headInches),
           neckInches: num(neckInches),
@@ -287,22 +302,6 @@ export function ProfileEditModal({ actor, open, onClose, initialTab = "basic" }:
             onChange={(e) => setSpecialSkills(e.target.value)}
             placeholder="Comma separated: Guitar, Dialects"
           />
-          <div>
-            <label className="block text-xs font-semibold text-curtain-700 tracking-wide mb-1">
-              Union Status
-            </label>
-            <select
-              value={unionStatus}
-              onChange={(e) => setUnionStatus(e.target.value as UnionStatus)}
-              className="w-full px-3 py-2.5 text-sm rounded-xl border bg-cream-50 border-cream-300 focus:ring-2 focus:ring-curtain-200 focus:border-curtain-300 outline-none"
-            >
-              {UNION_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
           <div className="grid grid-cols-2 gap-3">
             <Input
               label="City"
@@ -335,15 +334,89 @@ export function ProfileEditModal({ actor, open, onClose, initialTab = "basic" }:
             rows={6}
             placeholder="Tell directors about yourself..."
           />
+
+          {/* Bucket List Shows */}
+          <div>
+            <label className="block text-xs font-semibold text-curtain-700 tracking-wide mb-1">
+              Bucket List Shows
+            </label>
+            <p className="text-[11px] text-clay-400 mb-3">
+              Up to 5 dream roles. A great conversation starter at auditions.
+            </p>
+            <div className="flex flex-col gap-2">
+              {bucketListShows.map((show, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Input
+                    value={show.title}
+                    onChange={(e) => updateBucketListShow(i, "title", e.target.value)}
+                    placeholder="Show title"
+                    className="flex-1"
+                  />
+                  <Input
+                    value={show.role ?? ""}
+                    onChange={(e) => updateBucketListShow(i, "role", e.target.value)}
+                    placeholder="Dream role (optional)"
+                    className="flex-1"
+                  />
+                  <button
+                    onClick={() => removeBucketListShow(i)}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg text-clay-400 hover:text-ruby-500 hover:bg-cream-100 transition-colors flex-shrink-0"
+                    aria-label="Remove show"
+                  >
+                    <X className="w-4 h-4" weight="bold" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            {bucketListShows.length < 5 && (
+              <button
+                onClick={addBucketListShow}
+                className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-stage-600 hover:text-stage-700 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" weight="bold" />
+                Add a show
+              </button>
+            )}
+          </div>
         </div>
       )}
 
-      {/* ── Contact ── */}
-      {activeSection === "contact" && (
+      {/* ── Private ── */}
+      {activeSection === "private" && (
         <div className="flex flex-col gap-4">
-          <p className="text-xs text-clay-400 flex items-center gap-1.5">
-            Contact info is only visible to you and production teams.
+          <p className="text-xs text-clay-400">
+            This information is only visible to you and production teams for shows you&apos;ve signed up for.
           </p>
+
+          {/* Guardian info — only for minor accounts */}
+          {profile?.isMinor && (
+            <>
+              <p className="text-[10px] font-semibold text-clay-400 tracking-wide uppercase">
+                Guardian
+              </p>
+              <Input
+                label="Guardian Name"
+                value={guardianName}
+                onChange={(e) => setGuardianName(e.target.value)}
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  label="Guardian Email"
+                  type="email"
+                  value={guardianEmail}
+                  onChange={(e) => setGuardianEmail(e.target.value)}
+                />
+                <Input
+                  label="Guardian Phone"
+                  type="tel"
+                  value={guardianPhone}
+                  onChange={(e) => setGuardianPhone(e.target.value)}
+                />
+              </div>
+              <hr className="border-cream-200" />
+            </>
+          )}
+
           <Input
             label="Phone"
             type="tel"
@@ -351,28 +424,46 @@ export function ProfileEditModal({ actor, open, onClose, initialTab = "basic" }:
             onChange={(e) => setPhone(e.target.value)}
             placeholder="(555) 555-0100"
           />
-          <Input
-            label="Address"
-            value={addressLine1}
-            onChange={(e) => setAddressLine1(e.target.value)}
-            placeholder="Street address"
-          />
-          <div className="grid grid-cols-3 gap-3">
-            <Input
-              label="City"
-              value={addressCity}
-              onChange={(e) => setAddressCity(e.target.value)}
+          <div>
+            <Textarea
+              label="I describe myself as..."
+              value={appearanceDescription}
+              onChange={(e) => setAppearanceDescription(e.target.value)}
+              rows={2}
+              placeholder="How you'd describe your appearance — in your own words"
             />
-            <Input
-              label="State"
-              value={addressState}
-              onChange={(e) => setAddressState(e.target.value)}
+            <p className="text-[11px] text-clay-400 mt-1">
+              Helps directors understand your range for character-specific casting. Never shown publicly.
+            </p>
+          </div>
+
+          <hr className="border-cream-200" />
+
+          <p className="text-[10px] font-semibold text-clay-400 tracking-wide uppercase">
+            Only visible to you
+          </p>
+          <div>
+            <Textarea
+              label="Accessibility & Accommodation Needs"
+              value={accessibilityNeeds}
+              onChange={(e) => setAccessibilityNeeds(e.target.value)}
+              rows={2}
+              placeholder="Anything production teams should know to support you"
             />
+            <p className="text-[11px] text-clay-400 mt-1">
+              This is never shared. It&apos;s here so you can reference it when communicating with production teams on your own terms.
+            </p>
+          </div>
+          <div>
             <Input
-              label="ZIP"
-              value={addressZip}
-              onChange={(e) => setAddressZip(e.target.value)}
+              label="Dealbreakers"
+              value={dealbreakers}
+              onChange={(e) => setDealbreakers(e.target.value)}
+              placeholder="Comma separated: nudity, stage combat, firearms"
             />
+            <p className="text-[11px] text-clay-400 mt-1">
+              Shows with matching content advisories won&apos;t appear in your Discover feed.
+            </p>
           </div>
         </div>
       )}
@@ -381,7 +472,7 @@ export function ProfileEditModal({ actor, open, onClose, initialTab = "basic" }:
       {activeSection === "measurements" && (
         <div className="flex flex-col gap-4">
           <p className="text-xs text-clay-400">
-            Measurements help costume designers prepare for your fitting.
+            Measurements help costume designers prepare for your fitting. Only visible to production teams.
           </p>
           <p className="text-[10px] font-semibold text-clay-400 tracking-wide uppercase">
             Upper Body

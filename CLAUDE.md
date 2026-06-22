@@ -15,6 +15,128 @@
 
 ---
 
+## Feature Registry — LOCKED / OPEN
+
+**This is a contract.** Every shipped feature is listed here with a status.
+
+- **LOCKED** = working and depended upon. **Do NOT remove, rename, or change its behavior, UI, data shape, or copy unless the user explicitly tells you to in the current session.** If a task seems to require changing a LOCKED feature, stop and ask first. "Refactors," "cleanups," and "while I was in there" do not override LOCKED.
+- **OPEN** = in flux, incomplete, decided-but-unbuilt, or planned. Free to build/change/redesign.
+
+A feature being LOCKED does not freeze *bugs*: fixing a clearly-broken behavior is allowed, but say what you changed and why. When you add a new feature and the user confirms it works, move it to LOCKED in this file.
+
+### Foundations & architecture
+| Feature | Status | Note |
+|---|---|---|
+| Design system (tokens, typography, components, standard patterns below) | **LOCKED** | The rules in this file are non-negotiable. |
+| Dual-mode data layer (`isSupabaseConfigured` branch + mock fallback) | **LOCKED** | Mock mode must ALWAYS keep working with no `.env.local`. Never break it. |
+| Real auth (Supabase email+password; session restore; mock personas as fallback) | **LOCKED** | Anon key only — never the service key, never in client. |
+| The Chris Rule (no auditioning for a show you're on the team of) | **LOCKED** | Product invariant. |
+| Access-gating model (public = authenticated, never anonymous; anon never sees a person) | **LOCKED** | See `[[overture-access-gating]]`. |
+| `AuthGuard` on `(actor)` + `(production)` with deep-link return (`?next=`) | **LOCKED** | |
+| `useOrg()` org identity (never hardcode `org-1`) | **LOCKED** | Every production page derives org from this hook. |
+| Production permission gating (team/owner/admin; `canEvaluate` for evaluation actions) | **LOCKED** | |
+| Three-tier profile privacy (public / private / hidden) | **LOCKED** | |
+| Supabase schema + RLS (migrations 001–007) | **LOCKED** | Don't drop/rename tables or columns, or weaken RLS, without explicit say-so. |
+| Storage buckets: `photos`, `resumes` (private), `org-media` + owner/admin-scoped policies | **LOCKED** | |
+
+### Auth & onboarding
+| Feature | Status | Note |
+|---|---|---|
+| Login + Signup (email/password, confirm, email-confirmation state) | **LOCKED** | |
+| Onboarding fork (Actor / Theatre-maker); actor wizard incl. minor/guardian branch; maker wizard creates a real org | **LOCKED** | |
+| Sign-up wall (anon "Sign Up to Audition" → signup → return to show) | **LOCKED** | |
+| "My Theatre" entry in actor nav for org members | **LOCKED** | The actor↔theatre bridge. |
+| Google OAuth | **OPEN** | Button present, toasts "arrives with provider setup". Needs Google Cloud credential. |
+
+### Actor side
+| Feature | Status | Note |
+|---|---|---|
+| Discover (radius/sort/type filters, search, promoted, For You / Further Out) | **LOCKED** | |
+| Audition detail — phase-aware state machine (browsing→signed-up→callback→cast) | **LOCKED** | Most thoroughly designed page; the reference for new UI. |
+| Audition signup modal (slots, roles, conflicts, acknowledgments — all persist) | **LOCKED** | |
+| My Shows (per-show timelines, callback accept/decline, past credits) | **LOCKED** | |
+| Notifications (unread/read, mark-read, real unread nav badge) | **LOCKED** | |
+| Cast offers (agreements, confetti, guardian-bound consent for minors) | **LOCKED** | |
+| Profile (single scrolling page): vitals, bucket list, endorsements, acting credits, crew credits, training, awards, measurements, skills, minor/guardian card | **LOCKED** | |
+| Profile editing modals (Profile / Credit / CrewCredit / Training / Award) | **LOCKED** | |
+| Photos (headshot, production gallery w/ captions, resume PDF via signed URLs) | **LOCKED** | Cloud-only; mock shows "Coming Soon". |
+| Share + Add-to-Calendar (.ics) on audition page | **LOCKED** | |
+| Availability toggle + Invite-to-Audition | **OPEN** | `isAvailable` renders a badge; nothing sets it. Deferred to comms layer. |
+
+### Theatre / production side
+| Feature | Status | Note |
+|---|---|---|
+| Instant single-screen show creation (pre-filled from theatre) | **LOCKED** | Replaced the old 4-step wizard. |
+| Show home — checklist-forward + day-based audition scheduler | **LOCKED** | No per-block datetime entry. |
+| Callback scheduling (date/time/location/notes) on setup | **LOCKED** | |
+| Auditions schedule (batch status ops, search/filter, actor slide panel, team notes) | **LOCKED** | |
+| Callbacks management (role pools, uncalled-actors safety net, prep notes) | **LOCKED** | |
+| Casting board (primary/alternate/understudy, candidate pools, send offers → publish gating) | **LOCKED** | |
+| Cast list (publish, share, print, unpublish) | **LOCKED** | |
+| Show poster upload + display | **LOCKED** | |
+| Preview & "Copy link" to public audition page from setup | **LOCKED** | |
+| Theatre hub `/org` — details (founded/mission/socials/ticketing), logo, Spaces, Key People, Photos, code of conduct, members + invites, collaborators | **LOCKED** | |
+| Public theatre page — reputation surface ("should I work here?") | **LOCKED** | Empty sections omitted for visitors. |
+| Spaces with type grouping (Main Stage / Rehearsal / Other) | **LOCKED** | |
+| Manual past productions (merged with auto-derived) | **LOCKED** | |
+| Org member invitations + auto-accept at invitee's next sign-in (in-app) | **LOCKED** | Email delivery is OPEN (Resend). |
+| Archive show | **LOCKED** | |
+
+### Public layer
+| Feature | Status | Note |
+|---|---|---|
+| `/browse`, `/auditions/[id]`, `/theatres/[orgId]` anonymous-viewable | **LOCKED** | |
+| Public signup-count teaser + SM-contact gating on audition pages | **LOCKED** | |
+| Rich-text (bold/italic/bullets) for mission + code of conduct; safe Markdown render; photo Lightbox | **LOCKED** | |
+
+### Comms
+| Feature | Status | Note |
+|---|---|---|
+| In-app notification creation (callback-notify, send-offers, offer responses) | **LOCKED** | |
+| Email delivery via Resend Edge Function | **OPEN** | Staged + no-ops without `RESEND_API_KEY`. See `supabase/SETUP_RESEND.md`. |
+
+### OPEN — decided/planned, not built
+| Feature | Status | Note |
+|---|---|---|
+| Build B: verified-collaborator theatre reviews (stars), follow-a-theatre, thumbs-up on photos/shows | **OPEN** | Decided 2026-06-12; parked. See `[[overture-theatre-depth]]`. |
+| Duplicate-theatre prevention + claim/request-to-join flow | **OPEN** | Sprint D Phase 3. |
+| Geocoding / real radius distance (currently `distanceMiles` is null in cloud) | **OPEN** | Sprint D Phase 4; needs Google vs Mapbox decision. |
+| Account settings (change email, delete account, notification prefs) | **OPEN** | |
+| Content advisories on shows + dealbreaker filtering on Discover | **OPEN** | Dealbreakers collected but filter nothing yet. |
+| SEO / OG share meta on public pages | **OPEN** | |
+| Pre-loaded show/character database (Concord + MTI) | **OPEN** | V1.2 research; write our own descriptions. |
+| Billing / `$29/mo` / `/org/dashboard` | **OPEN** | V2. |
+| Per-show messaging (`/shows/[showId]/messages`) | **OPEN** | Planned. |
+| Full role-switcher UX (actor↔theatre hats beyond the nav entry) | **OPEN** | |
+
+---
+
+## Quality Bar
+
+The standard every change must clear before it's "done." If a change can't meet this, say so rather than shipping below it.
+
+**Correctness & safety**
+- `npx tsc --noEmit` is clean and `npx next build` passes before a task is called done. No type errors, no `any` to dodge a real type.
+- **Mock mode and cloud mode both work.** Every data-layer change keeps the `isSupabaseConfigured` branch AND the mock fallback. Cloud reads of not-yet-migrated tables are wrapped so they degrade to empty, never crash.
+- **Anon key only**, never the service/secret key, never a secret in client code or committed files. Schema changes go to a single pasteable, idempotent SQL file the user runs.
+- No console errors in normal flows. Every mutation: `onSuccess` → `invalidateQueries` + a toast; every async action has an error path.
+- Don't regress LOCKED features. Don't claim something works that you haven't verified — report what was actually checked.
+
+**UI & design**
+- The design-system rules in this file are non-negotiable: semantic tokens only, `Card` for boxed content, duotone Phosphor icons at `text-stage-500` inside cards, `font-display` for names/titles only, the standard patterns copied exactly.
+- **Every state is handled:** loading (`PageSkeleton`), empty (`EmptyState` with a real CTA), and error (toast). Never an infinite skeleton or a blank screen.
+- Mobile-first for actor flows, desktop-first for production — but neither is ever broken on the other. Tap targets are real; modals are reachable; the keyboard doesn't cover inputs.
+- Interactive elements are accessible: labels/`aria-label`, visible focus, keyboard operability (e.g. Lightbox arrow keys + Esc).
+- Copy is warm and plain — community-theatre voice, never corporate or jargon-y. Microcopy explains *why* (privacy notes, guardian context), not just *what*.
+
+**Product judgment**
+- **Creation instant, depth progressive.** Don't gate someone behind a form they don't need yet. Match operating simplicity to the moment.
+- **Protect minors and private data** by default — guardian consent, privacy tiers, gating enforced, not optional.
+- Verify observable changes in the browser when a server can exercise them; share proof. When something is stubbed or deferred, label it honestly in the UI and the roadmap.
+- When a decision is genuinely the user's (scope, product direction, trade-offs), ask — don't guess and don't silently expand scope.
+
+---
+
 ## Color Palette (defined in globals.css @theme inline)
 
 | Token     | Role                      | Usage                              |
@@ -195,12 +317,33 @@ Before creating a new component, check if one of these already handles your need
 | ShowCard      | `@/components/shows/ShowCard`     | Show in discover/shows list |
 | AuditionSignupModal | `@/components/auditions/AuditionSignupModal` | Signup form modal |
 | ConflictDatePicker  | `@/components/auditions/ConflictDatePicker`  | Date range conflict entry |
+| ProfileEditModal    | `@/components/profile/ProfileEditModal`      | Profile fields — 4 tabs: Basic Info, About, Private, Measurements |
+| CreditEditModal     | `@/components/profile/CreditEditModal`       | Acting credits CRUD; verified credits locked, manual editable |
+| CrewCreditEditModal | `@/components/profile/CrewCreditEditModal`   | Production/crew work CRUD (position + show + theatre + year); separate from acting credits |
+| TrainingEditModal   | `@/components/profile/TrainingEditModal`     | Training & education CRUD |
+| AwardEditModal      | `@/components/profile/AwardEditModal`        | Awards & recognition CRUD |
+| Lightbox            | `@/components/ui/Lightbox`                   | Full-screen photo viewer — prev/next via on-screen buttons + arrow keys, Esc to close, shows caption + kind label, wraps around. Used by the public theatre gallery |
+| RichTextEditor      | `@/components/ui/RichTextEditor`             | Simple markdown editor: textarea + 3-button toolbar (Bold / Italic / Bulleted list). Emits MARKDOWN. Used in the org mission + code-of-conduct modals |
+| Markdown            | `@/components/ui/Markdown`                   | SAFE markdown renderer — parses ONLY `**bold**`, `_italic_`/`*italic*`, and `- bullets`; builds the React element tree (NEVER `dangerouslySetInnerHTML`). Renders RichTextEditor output on the public theatre + hub pages |
+
+---
+
+## Profile Structure
+
+The actor profile (`/profile`) is a single scrolling page, NOT tabbed. Editing happens through focused modals, each triggered by a pencil icon next to its section header (or an empty-state CTA):
+
+- **ProfileEditModal** (top "Edit" button) — bio, vitals, location, pronouns, plus the Private tab (contact, appearance, accessibility, dealbreakers) and Measurements.
+- **CreditEditModal / TrainingEditModal / AwardEditModal** — list editors using the inline toggle-form pattern (see ConflictDatePicker). Each add/edit/delete is its own immediate mutation; no batched save. Delete uses inline confirmation.
+
+**Privacy tiers** (enforced in display + future RLS): Public (name, vitals, bucket list, skills, training, awards, credits) · Private — actor + production teams (contact, appearance, measurements, guardian info) · Hidden — actor only (dealbreakers, accessibility needs). Verified credits come from Overture casting and can't be edited; manual credits have no verified badge.
 
 ---
 
 ## Data Layer
 
-- **Mock API client:** `src/lib/api/client.ts` — all data access goes through here
+- **API client:** `src/lib/api/client.ts` — all data access goes through here. Supabase-backed when `.env.local` is configured (`isSupabaseConfigured` branch pattern), mock fallback otherwise. Migrated: public show/org reads, `getActor`, profile/credit/training/award mutations, audition signups (incl. withdraw-as-status-flip + revive), callbacks, cast assignments/offers, notifications (reads + creation via `create_notification` RPC at callback-notify / send-offers / offer-response moments — requires migration 005), AND the full theatre side: show/role/slot CRUD, show team (`getShowTeam`/`addTeamMember` — email-matched profiles get linked + notified, others stored as guests), team notes, org hub (`updateOrg`, `getOrgMembers` incl. pending invites, `inviteOrgMember`, role/remove), invite acceptance via `claim_org_invites` RPC (migration 006). Onboarding writes: `src/lib/api/onboarding.ts`. Photos/resume: `src/lib/api/photos.ts` (cloud-only; also `uploadShowPoster` → org-media bucket + `shows.poster_url`). Theatre profile depth (Sprint D Phase 2): `Org` now carries `foundedYear, mission, facebookUrl, instagramUrl, ticketingUrl`; new types `Venue`, `OrgLeader`, `OrgPhoto`; CRUD via `getVenues/…`, `getOrgLeadership/…`, `getOrgPhotos/addOrgPhoto/deleteOrgPhoto` in `client.ts` (cloud reads of these new tables are try/catch-wrapped → `[]` until migration 007 / PASTE_ME_NEXT.sql is pasted). `shows.posterUrl` displays on ShowCard, public audition hero, theatre season. **Build A (theatre polish):** `Venue.spaceType` (`performance`/`rehearsal`/`other`) groups & labels spaces on the public page ("Spaces", performance shown as "Main Stage"); `OrgPastProduction` (manual history — `getOrgPastProductions/create/update/deleteOrgPastProduction`) is MERGED with auto-derived past shows (cast/archived) on the public page, sorted by year desc; org logo upload via `uploadOrgLogo` (photos.ts, cloud-only); callback scheduling (date/time-range/location/notes) on the show setup page; audition blocks grouped by day on setup + public audition pages. All new cloud reads are try/catch-wrapped → `[]` until `PASTE_ME_NEXT.sql` is pasted (adds `venues.space_type` + `org_past_productions`). Email channel: `supabase/functions/send-notification-email` (Resend; staged — see `supabase/SETUP_RESEND.md`).
+- **Org identity:** `useOrg()` (`src/features/auth/useOrg.ts`) — the signed-in user's theatre `{ org, role, isLoading }`. NEVER hardcode `org-1`; every production page derives orgId/orgName from this hook (mock mode resolves to org-1 automatically). `claimPendingInvites()` runs at sign-in, session restore, and onboarding finish.
+- **Production gating:** the `(production)` layout blocks cloud users who aren't on the show's team or owner/admin of its org (friendly empty states; `getShowAccess`). Audition evaluation actions (status changes, shortlist, batch ops) are hidden unless the user `canEvaluate` (org owner/admin always can).
 - **Mock data:** `src/data/shows.ts` and `src/data/actors.ts`
 - **State management:** TanStack Query for server state, Zustand for UI state
 - **Queries:** Use `useQuery` with descriptive `queryKey` arrays
@@ -210,34 +353,46 @@ Before creating a new component, check if one of these already handles your need
 
 ## Route Structure
 
-### Actor routes (`(actor)/`)
+### Public routes (`(public)/`) — viewable logged-OUT (auth-aware Nav, NO guard)
+| Route                | Purpose                                                  | Status |
+|----------------------|----------------------------------------------------------|--------|
+| `/browse`            | Public open-auditions list; sign-up nudge when logged out | Built  |
+| `/auditions/[id]`    | Audition detail — phase-aware; anonymous sees `browsing` phase. *(Action/people gating = #3)* | Built  |
+| `/theatres/[orgId]`  | Public theatre page — REPUTATION surface ("should I work here?"): hero (logo/location/est. year/productions stat + website/FB/IG/ticketing links), mission, Key People, Performance Spaces (venue + Google-Maps link + accessibility/parking), upcoming season, open auditions, photo gallery, past productions, code of conduct. Empty sections OMITTED (no visitor prompts). | Built  |
+
+See [[overture-access-gating]] memory for the full public-vs-gated model. The `(public)` group has NO auth guard; `(actor)` will get one in gating step #3.
+
+### Actor routes (`(actor)/`) — gated (guard pending, step #3)
 | Route              | Purpose                                                 | Status |
 |--------------------|---------------------------------------------------------|--------|
-| `/discover`        | Browse open auditions (radius, sort, filter, promoted)  | Built  |
+| `/discover`        | Browse open auditions (radius, sort, filter, promoted) — personalized | Built  |
 | `/my-shows`        | Show hub — per-show timelines, past credits             | Built  |
-| `/auditions/[id]`  | Audition detail — phase-aware (browse/signup/callback)  | Built  |
 | `/notifications`   | Activity feed — callbacks, endorsements, kudos           | Built  |
-| `/profile`         | Actor showcase (4 tabs: About, History, Photos, Details) | Built  |
+| `/profile`         | Actor showcase — single scrolling page; editing via focused modals (see below) | Built  |
 | `/offers/[id]`     | Cast offer — celebratory accept/decline with agreements  | Built  |
-| `/onboarding`      | New user setup flow (role select → profile → complete)   | Planned |
+| `/onboarding`      | New user setup flow — forks Actor / Theatre-maker; standalone (not under actor/production nav) | Built  |
 
 ### Production routes (`(production)/`)
 | Route                              | Purpose                | Status |
 |------------------------------------|------------------------|--------|
 | `/shows`                           | Shows list             | Built  |
-| `/shows/new`                       | Create a new show      | Planned |
+| `/shows/new`                       | Create a show — ONE instant screen (title/type/season/rough audition dates; city/state + locations pre-filled from `useOrg`, editable). Creates in `setup` (private draft) → redirects to the show home. *(Replaced the old 4-step wizard, Sprint D.)* | Built |
+| `/shows/[showId]/setup`            | Show home — **checklist-forward** (Sprint D): a "Get this show ready" progress card leads (Show created · Add roles · Build team [optional] · Schedule auditions · Open auditions), each step done/todo with a CTA; the detailed edit sections (details/roles/schedule/team) remain below. A show sits happily in `setup` (private) until you open auditions. Audition scheduling uses **day-based generation** (pick a day + window + block length + capacity → one Generate makes all the `audition_groups`; live preview; blocks individually deletable) — no more per-block datetime entry. | Built  |
 | `/shows/[showId]/auditions`        | Audition schedule      | Built  |
 | `/shows/[showId]/callbacks`        | Callback management    | Built  |
 | `/shows/[showId]/casting`          | Casting board          | Built  |
 | `/shows/[showId]/cast-list`        | Published cast list    | Built  |
 | `/shows/[showId]/messages`         | Per-show communication | Planned |
-| `/org/dashboard`                   | Org home, billing      | Planned |
+| `/org`                             | Theatre hub — details (incl. founded/mission/FB/IG/ticketing), Performance Spaces, Key People, Photos (cloud-only upload), code of conduct, members + real invites (auto-accepted at invitee's next sign-in), show collaborators. Hub sections DO show empty-state prompts (unlike the public page). | Built  |
+| `/org/dashboard`                   | Billing / subscription | Planned (V2) |
 
 ### Auth routes (`(auth)/`)
 | Route       | Purpose            | Status |
 |-------------|--------------------|--------|
-| `/login`    | Sign in (Google/Apple via Supabase Auth) | Built (needs migration) |
-| `/signup`   | Create account     | Built (needs migration) |
+| `/login`    | Real Supabase email+password sign-in (inline errors); Google button toasts until provider setup | Built |
+| `/signup`   | Real email+password signup (≥8 chars, confirm field, email-confirmation state) | Built |
+
+**Auth:** `AuthContext` is dual-mode — real Supabase sessions (signUp/signInWithPassword/signOut, restore via `getSession` + `onAuthStateChange`, profile row mapped to `User`) when `.env.local` is configured; the mock personas remain the fallback. Never use the service key — anon key only.
 
 ### Dead routes — DELETE these
 - `(actor)/dashboard/page.tsx` — replaced by `/my-shows`
@@ -253,7 +408,7 @@ These are bugs and gaps in existing pages that MUST be fixed:
 - [x] **Dead buttons:** Set Up Profile, Add Measurements, camera icon — wired to edit modal. Upload Photos → "Coming Soon" badge.
 - [x] **ProfileEditModal data loss:** Verified — save function already sends ALL fields from ALL sections.
 - [x] **Signup modal validation:** Errors now only show after user attempts to submit (hasAttemptedSubmit gate).
-- [ ] **Signup modal data loss:** `isMember`, `mailingList`, `referralSource`, `mediaConsent`, `commitmentAcknowledged` are in SignupFormData but API function doesn't store them. Will resolve when migrating to Supabase.
+- [x] **Signup modal data loss:** FIXED — all five acknowledgment fields (`isMember`, `mailingList`, `referralSource`, `mediaConsent`, `commitmentAcknowledged`) persist to `audition_signups` in cloud mode (verified in-browser 2026-06-11).
 - [x] **Dead link:** `/theatres/[orgId]` link removed from audition detail page (org name shown as plain text).
 - [x] **Contact buttons:** Phone/email buttons now use real `tel:` and `mailto:` href attributes.
 - [x] **Notifications:** Mark-as-read on click + "Mark all read" button added.
@@ -263,8 +418,17 @@ These are bugs and gaps in existing pages that MUST be fixed:
 - [x] **Media consent:** No longer required to sign up — commitmentAck is the only required checkbox.
 - [x] **"Nearby" label:** Renamed to "Further Out" on Discover page.
 - [x] **Dead routes:** Deleted `/dashboard`, `/callbacks`, `/offers` pages.
-- [ ] **Save/Share/Calendar buttons:** Still decorative on audition detail page. Will implement with real functionality later.
-- [ ] **Search bar placeholder:** Says "Search shows, theatres, roles..." but can't search roles. Update placeholder or add role search.
+- [x] **Profile redesign:** Removed address + union status; added bucket list, appearance, accessibility, dealbreakers, guardian/minor fields, three-tier privacy.
+- [x] **Profile history editing:** Production credits, training, and awards are now editable via focused modals (see Profile Structure).
+- [x] **Route guards:** `(actor)` + `(production)` groups wrapped in `AuthGuard` → anonymous redirected to `/login?next=<path>` with deep-link return (threaded through login, signup, and onboarding).
+- [x] **Sign-up wall:** Anonymous "Sign Up to Audition" routes to signup with `next`; onboarding Done CTA becomes "Pick Up Where You Left Off". SM contact gated behind login on public audition pages; public signup-count teaser added.
+- [x] **Guardian consent:** Cast-offer agreements name and bind the guardian for minor accounts ("Accept as Guardian"); guardian fields editable in ProfileEditModal Private tab.
+- [x] **Share/Calendar buttons:** Share uses navigator.share/clipboard; Add to Calendar downloads an .ics for the signed-up slot. Save button removed (saved-shows list is a later feature).
+- [x] **Search bar placeholder:** Now reads "Search shows & theatres..." (accurate).
+- [x] **Nav notification badge:** Derived from real unread notifications (was hardcoded true).
+- [x] **Archive show:** Button on Setup quick actions when show is cast.
+- [ ] **Availability + Invite to Audition:** `isAvailable` toggle and director-initiated audition invites deferred to Phase 2 (ships with comms layer).
+- [x] **Photos:** Headshot upload (wired to hero camera button + `profiles.avatar_url`), production photo grid with captions/show tags + inline delete confirm, and private resume PDF (signed URLs) via `PhotoSection`/`ResumeSection` in `@/components/profile/PhotoSection`. Cloud-only — mock mode still shows "Coming Soon".
 
 ---
 

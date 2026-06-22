@@ -10,6 +10,7 @@ import {
   getShowTeam,
   getShowRoles,
   getOrg,
+  getActor,
   acceptCastOffer,
   declineCastOffer,
 } from "@/lib/api/client";
@@ -37,6 +38,7 @@ import {
   Envelope,
   MusicNotes,
   Confetti,
+  ShieldCheck,
   Star,
 } from "@phosphor-icons/react";
 
@@ -82,6 +84,13 @@ export default function CastOfferPage() {
     queryKey: ["showRoles", assignment?.showId],
     queryFn: () => getShowRoles(assignment!.showId),
     enabled: !!assignment?.showId,
+  });
+
+  // Needed for guardian consent — minors' agreements are made by their guardian
+  const { data: actorRecord } = useQuery({
+    queryKey: ["actor", user?.id],
+    queryFn: () => getActor(user!.id),
+    enabled: !!user,
   });
 
   // ── Mutations ────────────────────────────────────────
@@ -134,6 +143,10 @@ export default function CastOfferPage() {
   const isAccepted = assignment.status === "accepted";
   const isSent = assignment.status === "sent";
   const allChecked = rehearsalChecked && performanceChecked && conductChecked && membershipChecked && mediaChecked;
+
+  // Guardian consent: a minor's agreements are made by their guardian
+  const minorProfile = actorRecord?.profile?.isMinor ? actorRecord.profile : null;
+  const guardianName = minorProfile?.guardianName ?? null;
 
   // ── Render ───────────────────────────────────────────
   return (
@@ -315,8 +328,34 @@ export default function CastOfferPage() {
       {isSent && (
         <Card variant="flat" className="mb-6">
           <SectionHeader>Commitments &amp; Terms</SectionHeader>
+
+          {/* Guardian consent — minors don't sign for themselves */}
+          {minorProfile && (
+            <div className="flex items-start gap-2.5 p-3 mb-4 rounded-xl bg-stage-50 border border-stage-200">
+              <ShieldCheck className="w-5 h-5 text-stage-600 flex-shrink-0 mt-0.5" weight="duotone" />
+              <p className="text-xs text-curtain-800 leading-relaxed">
+                <span className="font-semibold">Guardian consent required.</span>{" "}
+                {guardianName ? (
+                  <>
+                    These agreements are made by{" "}
+                    <span className="font-semibold">{guardianName}</span>
+                    {minorProfile.guardianEmail && ` (${minorProfile.guardianEmail})`} on
+                    behalf of {actorRecord?.displayName}. By checking the boxes below,
+                    you confirm you are {actorRecord?.displayName}&apos;s guardian.
+                  </>
+                ) : (
+                  <>
+                    This account belongs to a minor and a guardian must accept these
+                    agreements. Add guardian details on the profile before accepting.
+                  </>
+                )}
+              </p>
+            </div>
+          )}
+
           <p className="text-sm text-clay-500 mb-5">
-            Please review and acknowledge each item to accept your role.
+            Please review and acknowledge each item to accept{" "}
+            {minorProfile ? "this role on your child's behalf" : "your role"}.
           </p>
 
           {/* 1. Rehearsal Attendance */}
@@ -447,12 +486,12 @@ export default function CastOfferPage() {
             variant="primary"
             size="lg"
             className="w-full"
-            disabled={!allChecked}
+            disabled={!allChecked || (!!minorProfile && !guardianName)}
             loading={acceptMutation.isPending}
             onClick={() => acceptMutation.mutate()}
           >
             <Confetti className="w-5 h-5" weight="duotone" />
-            Accept Role
+            {minorProfile ? "Accept as Guardian" : "Accept Role"}
           </Button>
           <Button
             variant="outline"

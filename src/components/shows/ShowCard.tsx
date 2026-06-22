@@ -33,7 +33,15 @@ export function ShowCard({ show, linkTo }: Props) {
         </div>
       )}
       <div className="flex items-start gap-4">
-        <Avatar name={show.orgName} variant="org" size="lg" className="bg-stage-100 text-stage-700" />
+        {show.posterUrl ? (
+          <img
+            src={show.posterUrl}
+            alt={`${show.title} poster`}
+            className="w-12 h-16 rounded-lg object-cover flex-shrink-0 bg-cream-100"
+          />
+        ) : (
+          <Avatar name={show.orgName} variant="org" size="lg" className="bg-stage-100 text-stage-700" />
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <h3 className="text-lg font-display text-curtain-900 truncate">

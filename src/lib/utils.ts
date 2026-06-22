@@ -36,7 +36,13 @@ export function formatTeamRole(role: string): string {
 
 export function formatDate(date: string | null): string {
   if (!date) return "";
-  return new Date(date).toLocaleDateString("en-US", {
+  // Date-only strings (YYYY-MM-DD) parse as UTC midnight, which renders a day
+  // early in negative-offset timezones. Pin those to local noon. Full
+  // timestamps (with a time component) are left to parse normally.
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? new Date(`${date}T12:00:00`)
+    : new Date(date);
+  return d.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",

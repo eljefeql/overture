@@ -19,7 +19,7 @@ export default function LandingPage() {
           >
             Sign In
           </Link>
-          <Link href="/login">
+          <Link href="/signup">
             <Button size="sm">Get Started</Button>
           </Link>
         </div>
@@ -37,11 +37,11 @@ export default function LandingPage() {
           Actors find auditions. Directors find talent. Everyone finds their place.
         </p>
         <div className="flex items-center justify-center gap-4">
-          <Link href="/login">
+          <Link href="/signup">
             <Button size="lg">Start Free</Button>
           </Link>
           <Link
-            href="/discover"
+            href="/browse"
             className="px-6 py-3 text-base font-semibold text-curtain-300 hover:text-white border border-curtain-700 hover:border-curtain-500 rounded-xl transition"
           >
             Browse Auditions

@@ -1,4 +1,4 @@
-import type { Show, ShowRole, ShowTeamMember, AuditionGroup, Org, CastAssignment } from "@/types";
+import type { Show, ShowRole, ShowTeamMember, AuditionGroup, Org, OrgMember, CastAssignment, Venue, OrgLeader, OrgPastProduction } from "@/types";
 
 // ============================================================
 // ORGANIZATIONS
@@ -14,6 +14,14 @@ export const orgs: Org[] = [
     city: "Riverside",
     state: "CA",
     websiteUrl: "https://northcountytheatre.org",
+    codeOfConduct:
+      "NCT is committed to a safe, inclusive, and respectful environment for every volunteer, performer, and audience member. We do not tolerate harassment, discrimination, or unsafe behavior of any kind. All company members agree to: treat one another with respect; honor rehearsal and performance commitments; follow safety guidance from stage management; and raise concerns promptly with the production team or board. Minors are always supervised, and guardians are kept informed of schedules and expectations.",
+    foundedYear: 1985,
+    mission:
+      "North County Theatre exists to bring our community together through the shared experience of live theatre. We believe great theatre is made by great people — so we put care into every rehearsal room, welcome performers of all experience levels, and treat our volunteers, crew, and cast as the heart of the company.",
+    facebookUrl: "https://facebook.com/northcountytheatre",
+    instagramUrl: "https://instagram.com/northcountytheatre",
+    ticketingUrl: "https://northcountytheatre.org/tickets",
     createdAt: "2024-01-15T00:00:00Z",
     updatedAt: "2024-01-15T00:00:00Z",
   },
@@ -26,6 +34,13 @@ export const orgs: Org[] = [
     city: "San Jose",
     state: "CA",
     websiteUrl: null,
+    codeOfConduct: null,
+    foundedYear: 2003,
+    mission:
+      "City Light Theatre champions bold, contemporary work in the heart of downtown San Jose, with a commitment to paying artists and welcoming new audiences.",
+    facebookUrl: "https://facebook.com/citylighttheatre",
+    instagramUrl: null,
+    ticketingUrl: null,
     createdAt: "2023-06-01T00:00:00Z",
     updatedAt: "2023-06-01T00:00:00Z",
   },
@@ -38,6 +53,12 @@ export const orgs: Org[] = [
     city: "Moreno Valley",
     state: "CA",
     websiteUrl: null,
+    codeOfConduct: null,
+    foundedYear: null,
+    mission: null,
+    facebookUrl: null,
+    instagramUrl: null,
+    ticketingUrl: null,
     createdAt: "2023-09-01T00:00:00Z",
     updatedAt: "2023-09-01T00:00:00Z",
   },
@@ -50,6 +71,12 @@ export const orgs: Org[] = [
     city: "Temecula",
     state: "CA",
     websiteUrl: null,
+    codeOfConduct: null,
+    foundedYear: null,
+    mission: null,
+    facebookUrl: null,
+    instagramUrl: null,
+    ticketingUrl: null,
     createdAt: "2022-03-01T00:00:00Z",
     updatedAt: "2022-03-01T00:00:00Z",
   },
@@ -62,6 +89,12 @@ export const orgs: Org[] = [
     city: "Corona",
     state: "CA",
     websiteUrl: null,
+    codeOfConduct: null,
+    foundedYear: null,
+    mission: null,
+    facebookUrl: null,
+    instagramUrl: null,
+    ticketingUrl: null,
     createdAt: "2021-01-01T00:00:00Z",
     updatedAt: "2021-01-01T00:00:00Z",
   },
@@ -74,8 +107,207 @@ export const orgs: Org[] = [
     city: "Redlands",
     state: "CA",
     websiteUrl: null,
+    codeOfConduct: null,
+    foundedYear: null,
+    mission: null,
+    facebookUrl: null,
+    instagramUrl: null,
+    ticketingUrl: null,
     createdAt: "2024-06-01T00:00:00Z",
     updatedAt: "2024-06-01T00:00:00Z",
+  },
+];
+
+// ============================================================
+// VENUES (performance spaces — Sprint D Phase 2)
+// ============================================================
+
+export const venues: Venue[] = [
+  {
+    id: "venue-1",
+    orgId: "org-1",
+    name: "The Riverside Playhouse",
+    address: "412 Main Street, Riverside, CA 92501",
+    capacity: 220,
+    accessibilityNotes:
+      "Step-free entrance from the Main Street lobby; wheelchair seating in row C and at the rear orchestra. Accessible restrooms on the main floor. An assistive-listening loop is available — ask the house manager.",
+    parkingNotes:
+      "Free parking in the municipal lot behind the theatre (entrance on 4th Street). Two ADA spaces by the stage door.",
+    isPrimary: true,
+    spaceType: "performance",
+    sortOrder: 0,
+    createdAt: "2024-02-01T00:00:00Z",
+  },
+  {
+    id: "venue-2",
+    orgId: "org-1",
+    name: "The Black Box at NCT",
+    address: "418 Main Street, Riverside, CA 92501",
+    capacity: 60,
+    accessibilityNotes:
+      "Ground-floor flexible space, fully step-free. Movable seating accommodates wheelchair users anywhere in the room.",
+    parkingNotes: "Shares the municipal lot with the Playhouse next door.",
+    isPrimary: false,
+    spaceType: "performance",
+    sortOrder: 1,
+    createdAt: "2024-02-01T00:00:00Z",
+  },
+  {
+    id: "venue-4",
+    orgId: "org-1",
+    name: "NCT Rehearsal Studio",
+    address: "420 Main Street, Riverside, CA 92501",
+    capacity: null,
+    accessibilityNotes:
+      "Second-floor studio with elevator access; sprung floor and full-length mirrors.",
+    parkingNotes: "Same municipal lot; load-in via the alley door.",
+    isPrimary: false,
+    spaceType: "rehearsal",
+    sortOrder: 2,
+    createdAt: "2024-02-01T00:00:00Z",
+  },
+  {
+    id: "venue-5",
+    orgId: "org-1",
+    name: "Costume & Scene Shop",
+    address: "Riverside, CA",
+    capacity: null,
+    accessibilityNotes: null,
+    parkingNotes: null,
+    isPrimary: false,
+    spaceType: "other",
+    sortOrder: 3,
+    createdAt: "2024-02-01T00:00:00Z",
+  },
+  {
+    id: "venue-3",
+    orgId: "org-2",
+    name: "City Light Mainstage",
+    address: "88 Paseo de San Antonio, San Jose, CA 95113",
+    capacity: 180,
+    accessibilityNotes: "Elevator access to all levels; accessible seating and restrooms throughout.",
+    parkingNotes: "Paid garage adjacent (Second Street); street parking free after 6pm.",
+    isPrimary: true,
+    spaceType: "performance",
+    sortOrder: 0,
+    createdAt: "2023-07-01T00:00:00Z",
+  },
+];
+
+// ============================================================
+// ORG PAST PRODUCTIONS (manual history — Build A)
+// ============================================================
+
+export const orgPastProductions: OrgPastProduction[] = [
+  {
+    id: "opp-1",
+    orgId: "org-1",
+    title: "Fiddler on the Roof",
+    year: 2019,
+    notes: "Our 35th-anniversary season opener — a sell-out run.",
+    sortOrder: 0,
+    createdAt: "2024-02-01T00:00:00Z",
+  },
+  {
+    id: "opp-2",
+    orgId: "org-1",
+    title: "A Midsummer Night's Dream",
+    year: 2021,
+    notes: "Staged outdoors in White Park after the shutdown.",
+    sortOrder: 1,
+    createdAt: "2024-02-01T00:00:00Z",
+  },
+  {
+    id: "opp-3",
+    orgId: "org-1",
+    title: "Little Shop of Horrors",
+    year: 2018,
+    notes: null,
+    sortOrder: 2,
+    createdAt: "2024-02-01T00:00:00Z",
+  },
+];
+
+// ============================================================
+// ORG LEADERSHIP (public key people — Sprint D Phase 2)
+// ============================================================
+
+export const orgLeadership: OrgLeader[] = [
+  {
+    id: "leader-1",
+    orgId: "org-1",
+    name: "Sarah Mitchell",
+    title: "Artistic Director",
+    photoUrl: null,
+    sortOrder: 0,
+    createdAt: "2024-02-01T00:00:00Z",
+  },
+  {
+    id: "leader-2",
+    orgId: "org-1",
+    name: "Tom Briggs",
+    title: "Managing Director",
+    photoUrl: null,
+    sortOrder: 1,
+    createdAt: "2024-02-01T00:00:00Z",
+  },
+  {
+    id: "leader-3",
+    orgId: "org-1",
+    name: "Elena Vásquez",
+    title: "Board President",
+    photoUrl: null,
+    sortOrder: 2,
+    createdAt: "2024-02-01T00:00:00Z",
+  },
+  {
+    id: "leader-4",
+    orgId: "org-2",
+    name: "Marcus Lee",
+    title: "Founding Artistic Director",
+    photoUrl: null,
+    sortOrder: 0,
+    createdAt: "2023-07-01T00:00:00Z",
+  },
+];
+
+// ============================================================
+// ORG MEMBERS (theatre-level membership — distinct from showTeam)
+// ============================================================
+
+export const orgMembers: OrgMember[] = [
+  {
+    id: "om-1",
+    orgId: "org-1",
+    userId: "user-team-1",
+    name: "Sarah Mitchell",
+    email: "sarah.mitchell@email.com",
+    role: "owner",
+    status: "active",
+    invitedAt: "2024-01-15T00:00:00Z",
+    joinedAt: "2024-01-15T00:00:00Z",
+  },
+  {
+    id: "om-2",
+    orgId: "org-1",
+    userId: "user-team-2",
+    name: "Tom Briggs",
+    email: "tom.briggs@email.com",
+    role: "admin",
+    status: "active",
+    invitedAt: "2024-06-01T00:00:00Z",
+    joinedAt: "2024-06-03T00:00:00Z",
+  },
+  {
+    id: "om-3",
+    orgId: "org-1",
+    userId: null,
+    name: "Linda Park",
+    email: "linda.park@email.com",
+    role: "member",
+    status: "invited",
+    invitedAt: "2026-06-01T00:00:00Z",
+    joinedAt: null,
   },
 ];
 
@@ -108,6 +340,7 @@ export const shows: Show[] = [
     performanceLocation: "NCT Main Stage, 1234 Oak Ave, Riverside",
     callbackContactName: "David Chen",
     callbackContactPhone: "(951) 555-0142",
+    posterUrl: null,
     city: "Riverside",
     state: "CA",
     distanceMiles: 3,
@@ -139,6 +372,7 @@ export const shows: Show[] = [
     performanceLocation: "NCT Main Stage, 1234 Oak Ave, Riverside",
     callbackContactName: null,
     callbackContactPhone: null,
+    posterUrl: null,
     city: "Riverside",
     state: "CA",
     distanceMiles: 3,
@@ -170,6 +404,7 @@ export const shows: Show[] = [
     performanceLocation: "City Light Playhouse, 456 Main St, San Jose",
     callbackContactName: "Rachel Kim",
     callbackContactPhone: "(408) 555-0198",
+    posterUrl: null,
     city: "San Jose",
     state: "CA",
     distanceMiles: 55,
@@ -202,6 +437,7 @@ export const shows: Show[] = [
     performanceLocation: "Eastside Community Center, 789 Elm St, Moreno Valley",
     callbackContactName: null,
     callbackContactPhone: null,
+    posterUrl: null,
     city: "Moreno Valley",
     state: "CA",
     distanceMiles: 12,
@@ -233,6 +469,7 @@ export const shows: Show[] = [
     performanceLocation: "Corona Civic Playhouse, 112 Main St, Corona",
     callbackContactName: null,
     callbackContactPhone: null,
+    posterUrl: null,
     city: "Corona",
     state: "CA",
     distanceMiles: 18,
@@ -264,6 +501,7 @@ export const shows: Show[] = [
     performanceLocation: "Valley Playhouse, 42045 Main St, Temecula",
     callbackContactName: null,
     callbackContactPhone: null,
+    posterUrl: null,
     city: "Temecula",
     state: "CA",
     distanceMiles: 45,
@@ -295,6 +533,7 @@ export const shows: Show[] = [
     performanceLocation: "IESC Black Box, 220 Citrus Ave, Redlands",
     callbackContactName: null,
     callbackContactPhone: null,
+    posterUrl: null,
     city: "Redlands",
     state: "CA",
     distanceMiles: 22,
@@ -326,6 +565,7 @@ export const shows: Show[] = [
     performanceLocation: "Eastside Community Center, 789 Elm St, Moreno Valley",
     callbackContactName: null,
     callbackContactPhone: null,
+    posterUrl: null,
     city: "Moreno Valley",
     state: "CA",
     distanceMiles: 12,
@@ -360,6 +600,7 @@ export const shows: Show[] = [
     performanceLocation: "NCT Main Stage, 1234 Oak Ave, Riverside",
     callbackContactName: "Sarah Mitchell",
     callbackContactPhone: "(951) 555-0101",
+    posterUrl: null,
     city: "Riverside",
     state: "CA",
     distanceMiles: 3,
@@ -391,6 +632,7 @@ export const shows: Show[] = [
     performanceLocation: "NCT Studio Theatre, 1240 Oak Ave, Riverside",
     callbackContactName: "David Chen",
     callbackContactPhone: "(951) 555-0142",
+    posterUrl: null,
     city: "Riverside",
     state: "CA",
     distanceMiles: 3,
@@ -422,6 +664,7 @@ export const shows: Show[] = [
     performanceLocation: "NCT Main Stage, 1234 Oak Ave, Riverside",
     callbackContactName: "Sarah Mitchell",
     callbackContactPhone: "(951) 555-0101",
+    posterUrl: null,
     city: "Riverside",
     state: "CA",
     distanceMiles: 3,
@@ -453,6 +696,7 @@ export const shows: Show[] = [
     performanceLocation: "NCT Studio Theatre, 1240 Oak Ave, Riverside",
     callbackContactName: "David Chen",
     callbackContactPhone: "(951) 555-0142",
+    posterUrl: null,
     city: "Riverside",
     state: "CA",
     distanceMiles: 3,
@@ -484,6 +728,7 @@ export const shows: Show[] = [
     performanceLocation: "NCT Main Stage, 1234 Oak Ave, Riverside",
     callbackContactName: "Sarah Mitchell",
     callbackContactPhone: "(951) 555-0101",
+    posterUrl: null,
     city: "Riverside",
     state: "CA",
     distanceMiles: 3,

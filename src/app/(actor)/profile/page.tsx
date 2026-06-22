@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/features/auth/AuthContext";
 import { getActor } from "@/lib/api/client";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
   Avatar,
   Card,
@@ -29,26 +30,24 @@ import {
   GraduationCap,
   Trophy,
   Quotes,
-  IdentificationBadge,
   MaskHappy,
+  Star,
+  ShieldCheck,
+  Eye,
+  EyeSlash,
+  FilmSlate,
 } from "@phosphor-icons/react";
 import { ProfileEditModal } from "@/components/profile/ProfileEditModal";
+import { CreditEditModal } from "@/components/profile/CreditEditModal";
+import { CrewCreditEditModal } from "@/components/profile/CrewCreditEditModal";
+import { TrainingEditModal } from "@/components/profile/TrainingEditModal";
+import { AwardEditModal } from "@/components/profile/AwardEditModal";
+import {
+  PhotoSection,
+  ResumeSection,
+  type PhotoSectionHandle,
+} from "@/components/profile/PhotoSection";
 import type { ActorWithProfile } from "@/types";
-
-/* ============================================================
-   Union status display helper
-   ============================================================ */
-
-const UNION_LABELS: Record<string, string> = {
-  non_union: "Non-Union",
-  aea: "AEA",
-  sag_aftra: "SAG-AFTRA",
-  aea_sag: "AEA / SAG-AFTRA",
-};
-
-/* ============================================================
-   Profile Page — Single scrollable actor showcase
-   ============================================================ */
 
 export default function ProfilePage() {
   const { user } = useAuth();
@@ -59,7 +58,12 @@ export default function ProfilePage() {
   });
 
   const [editOpen, setEditOpen] = useState(false);
+  const [creditEditOpen, setCreditEditOpen] = useState(false);
+  const [crewEditOpen, setCrewEditOpen] = useState(false);
+  const [trainingEditOpen, setTrainingEditOpen] = useState(false);
+  const [awardEditOpen, setAwardEditOpen] = useState(false);
   const [likedCredits, setLikedCredits] = useState<Set<string>>(new Set());
+  const photoSectionRef = useRef<PhotoSectionHandle>(null);
 
   function toggleLike(creditId: string) {
     setLikedCredits((prev) => {
@@ -91,7 +95,6 @@ export default function ProfilePage() {
 
   const profile = actor.profile;
 
-  // Build vitals array dynamically — skip missing fields
   const vitals: { label: string; value: string }[] = [];
   if (profile?.ageRangeLow && profile?.ageRangeHigh) {
     vitals.push({
@@ -109,10 +112,8 @@ export default function ProfilePage() {
     vitals.push({ label: "Dance", value: profile.danceStyles.join(", ") });
   }
 
-  // Contact info
-  const hasContact = actor.email || profile?.phone || profile?.addressLine1;
+  const hasContact = actor.email || profile?.phone;
 
-  // Measurements
   const m = profile?.measurements;
   const measurementGroups = m
     ? [
@@ -150,7 +151,6 @@ export default function ProfilePage() {
       ].filter((group) => group.items.length > 0)
     : [];
 
-  // Summary stats for credits
   const totalCredits = actor.credits.length;
   const verifiedCount = actor.credits.filter((c) => c.verified).length;
   const totalKudos = actor.credits.reduce((sum, c) => sum + c.likeCount, 0);
@@ -159,7 +159,6 @@ export default function ProfilePage() {
     <div className="max-w-2xl mx-auto px-6 py-8">
       {/* ===== HERO ===== */}
       <div className="mb-6 animate-fade-up">
-        {/* Edit button — top right */}
         <div className="flex justify-end mb-2">
           <Button
             variant="outline"
@@ -171,9 +170,7 @@ export default function ProfilePage() {
           </Button>
         </div>
 
-        {/* Avatar + info — stacked on mobile, side-by-side on desktop */}
         <div className="flex flex-col items-center text-center md:flex-row md:items-start md:text-left md:gap-5">
-          {/* Headshot with gold ring + camera prompt */}
           <div className="relative flex-shrink-0 mb-4 md:mb-0">
             <div className="ring-4 ring-stage-200 rounded-full">
               <Avatar
@@ -183,7 +180,11 @@ export default function ProfilePage() {
               />
             </div>
             <button
-              onClick={() => setEditOpen(true)}
+              onClick={() =>
+                isSupabaseConfigured
+                  ? photoSectionRef.current?.openHeadshotPicker()
+                  : setEditOpen(true)
+              }
               className="absolute bottom-1 right-1 w-8 h-8 rounded-full bg-curtain-800 text-white flex items-center justify-center shadow-lg hover:bg-curtain-700 transition-colors"
               aria-label="Edit profile photo"
             >
@@ -191,11 +192,15 @@ export default function ProfilePage() {
             </button>
           </div>
 
-          {/* Name + details */}
           <div>
-            <h1 className="text-3xl font-display text-curtain-900">
-              {actor.displayName}
-            </h1>
+            <div className="flex items-center gap-2 justify-center md:justify-start">
+              <h1 className="text-3xl font-display text-curtain-900">
+                {actor.displayName}
+              </h1>
+              {profile?.isMinor && (
+                <Badge variant="warning" size="sm">Minor</Badge>
+              )}
+            </div>
             {actor.pronouns && (
               <p className="text-sm text-clay-500">{actor.pronouns}</p>
             )}
@@ -223,6 +228,26 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      {/* Minor / Guardian info */}
+      {profile?.isMinor && profile?.guardianName && (
+        <div className="mb-6 animate-fade-up" style={{ animationDelay: "25ms" }}>
+          <Card variant="highlighted" padding="compact">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-stage-500" weight="duotone" />
+              <div>
+                <p className="text-sm font-semibold text-curtain-900">
+                  Guardian: {profile.guardianName}
+                </p>
+                <p className="text-xs text-clay-500">
+                  {profile.guardianEmail}
+                  {profile.guardianPhone && ` · ${profile.guardianPhone}`}
+                </p>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
       <hr className="gold-line" />
 
       {/* ===== BIO ===== */}
@@ -233,6 +258,26 @@ export default function ProfilePage() {
               {profile.bio}
             </p>
           </Card>
+        </div>
+      )}
+
+      {/* ===== BUCKET LIST ===== */}
+      {profile && profile.bucketListShows.length > 0 && (
+        <div className="mb-6 animate-fade-up" style={{ animationDelay: "75ms" }}>
+          <SectionHeader>Bucket List</SectionHeader>
+          <div className="flex flex-col gap-2">
+            {profile.bucketListShows.map((show, i) => (
+              <div key={i} className="flex items-center gap-2.5">
+                <Star className="w-4 h-4 text-stage-500 flex-shrink-0" weight="duotone" />
+                <p className="text-sm text-curtain-800">
+                  <span className="font-display">{show.title}</span>
+                  {show.role && (
+                    <span className="text-clay-500"> — {show.role}</span>
+                  )}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -278,17 +323,19 @@ export default function ProfilePage() {
                   {profile.phone}
                 </a>
               )}
-              {profile?.addressLine1 && (
-                <div className="flex items-center gap-2 text-sm text-curtain-800">
-                  <MapPin
-                    className="w-4 h-4 text-stage-500"
-                    weight="duotone"
-                  />
-                  {profile.addressLine1}, {profile.addressCity},{" "}
-                  {profile.addressState} {profile.addressZip}
-                </div>
-              )}
             </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ===== APPEARANCE (private) ===== */}
+      {profile?.appearanceDescription && (
+        <div className="mb-6 animate-fade-up" style={{ animationDelay: "175ms" }}>
+          <PrivacyHeader title="Appearance" />
+          <Card variant="flat" padding="compact">
+            <p className="text-sm text-curtain-800 leading-relaxed">
+              {profile.appearanceDescription}
+            </p>
           </Card>
         </div>
       )}
@@ -318,9 +365,17 @@ export default function ProfilePage() {
       {/* ===== PRODUCTION HISTORY ===== */}
       {actor.credits.length > 0 && (
         <div className="mb-6 animate-fade-up" style={{ animationDelay: "250ms" }}>
-          <SectionHeader>Production History</SectionHeader>
+          <div className="flex items-center justify-between mb-3">
+            <SectionHeader className="mb-0">Production History</SectionHeader>
+            <button
+              onClick={() => setCreditEditOpen(true)}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-clay-400 hover:text-curtain-700 hover:bg-cream-100 transition-colors"
+              aria-label="Edit production history"
+            >
+              <PencilSimple className="w-3.5 h-3.5" weight="bold" />
+            </button>
+          </div>
 
-          {/* Summary line */}
           <p className="text-xs text-clay-500 mb-3">
             {totalCredits} production{totalCredits !== 1 ? "s" : ""}
             {verifiedCount > 0 && ` · ${verifiedCount} verified`}
@@ -334,7 +389,6 @@ export default function ProfilePage() {
 
               return (
                 <Card key={credit.id} variant="elevated" padding="compact">
-                  {/* Credit header */}
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
@@ -383,7 +437,6 @@ export default function ProfilePage() {
                     </div>
                   </div>
 
-                  {/* Kudos quote */}
                   {credit.kudos && (
                     <div className="mt-3 pt-3 border-t border-cream-200">
                       <div className="flex gap-2">
@@ -409,22 +462,94 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* Empty state for credits + endorsements */}
-      {actor.credits.length === 0 && actor.endorsements.length === 0 && (
+      {actor.credits.length === 0 && (
         <div className="mb-6 animate-fade-up" style={{ animationDelay: "250ms" }}>
+          <SectionHeader>Production History</SectionHeader>
           <Card variant="sunken" className="text-center py-12">
-            <p className="text-sm text-clay-500">
-              No show history yet. Credits and endorsements will appear here as
-              you participate in productions.
+            <p className="text-sm text-clay-500 mb-1">
+              No show history yet.
             </p>
+            <p className="text-xs text-clay-400 mb-4">
+              Add your past productions, or credits will appear automatically when you&apos;re cast through Overture.
+            </p>
+            <Button size="sm" variant="outline" onClick={() => setCreditEditOpen(true)}>
+              Add Your First Credit
+            </Button>
+          </Card>
+        </div>
+      )}
+
+      {/* ===== PRODUCTION WORK (crew/creative-team credits) ===== */}
+      {actor.crewCredits.length > 0 ? (
+        <div className="mb-6 animate-fade-up" style={{ animationDelay: "275ms" }}>
+          <div className="flex items-center justify-between mb-3">
+            <SectionHeader className="mb-0">Production Work</SectionHeader>
+            <button
+              onClick={() => setCrewEditOpen(true)}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-clay-400 hover:text-curtain-700 hover:bg-cream-100 transition-colors"
+              aria-label="Edit production work"
+            >
+              <PencilSimple className="w-3.5 h-3.5" weight="bold" />
+            </button>
+          </div>
+          <div className="flex flex-col gap-3">
+            {actor.crewCredits.map((credit) => (
+              <Card key={credit.id} variant="flat" padding="compact">
+                <div className="flex items-start gap-3">
+                  <FilmSlate
+                    className="w-5 h-5 text-stage-500 flex-shrink-0 mt-0.5"
+                    weight="duotone"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-semibold text-curtain-900">
+                        {credit.position}
+                      </p>
+                      {credit.verified && <VerifiedBadge />}
+                    </div>
+                    <p className="text-sm text-curtain-700">
+                      <span className="font-display">{credit.showTitle}</span>
+                      <span className="text-clay-400 mx-1.5">·</span>
+                      <span className="text-clay-500">{credit.theatreName}</span>
+                    </p>
+                  </div>
+                  <span className="text-sm font-semibold text-stage-600 flex-shrink-0">
+                    {credit.year}
+                  </span>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="mb-6 animate-fade-up" style={{ animationDelay: "275ms" }}>
+          <SectionHeader>Production Work</SectionHeader>
+          <Card variant="sunken" className="text-center py-12">
+            <FilmSlate className="w-12 h-12 text-clay-300 mx-auto mb-3" weight="duotone" />
+            <p className="text-sm text-clay-500 mb-4 max-w-xs mx-auto">
+              Directed, stage managed, choreographed, or designed? Show your
+              behind-the-scenes work alongside your acting.
+            </p>
+            <Button size="sm" variant="outline" onClick={() => setCrewEditOpen(true)}>
+              Add Production Work
+            </Button>
           </Card>
         </div>
       )}
 
       {/* ===== TRAINING & EDUCATION ===== */}
-      {profile && profile.training.length > 0 && (
+      {profile && profile.training.length > 0 ? (
         <div className="mb-6 animate-fade-up" style={{ animationDelay: "300ms" }}>
-          <SectionHeader>Training & Education</SectionHeader>
+          <div className="flex items-center justify-between mb-3">
+            <SectionHeader className="mb-0">Training & Education</SectionHeader>
+            <button
+              onClick={() => setTrainingEditOpen(true)}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-clay-400 hover:text-curtain-700 hover:bg-cream-100 transition-colors"
+              aria-label="Edit training"
+            >
+              <PencilSimple className="w-3.5 h-3.5" weight="bold" />
+            </button>
+          </div>
           <div className="flex flex-col gap-3">
             {profile.training.map((t) => (
               <Card key={t.id} variant="flat" padding="compact">
@@ -447,12 +572,34 @@ export default function ProfilePage() {
             ))}
           </div>
         </div>
+      ) : profile && (
+        <div className="mb-6 animate-fade-up" style={{ animationDelay: "300ms" }}>
+          <SectionHeader>Training & Education</SectionHeader>
+          <Card variant="sunken" className="text-center py-12">
+            <GraduationCap className="w-12 h-12 text-clay-300 mx-auto mb-3" weight="duotone" />
+            <p className="text-sm text-clay-500 mb-4">
+              Add classes, workshops, and degrees to show your background.
+            </p>
+            <Button size="sm" variant="outline" onClick={() => setTrainingEditOpen(true)}>
+              Add Training
+            </Button>
+          </Card>
+        </div>
       )}
 
       {/* ===== AWARDS ===== */}
-      {profile && profile.awards.length > 0 && (
+      {profile && profile.awards.length > 0 ? (
         <div className="mb-6 animate-fade-up" style={{ animationDelay: "350ms" }}>
-          <SectionHeader>Awards & Recognition</SectionHeader>
+          <div className="flex items-center justify-between mb-3">
+            <SectionHeader className="mb-0">Awards & Recognition</SectionHeader>
+            <button
+              onClick={() => setAwardEditOpen(true)}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-clay-400 hover:text-curtain-700 hover:bg-cream-100 transition-colors"
+              aria-label="Edit awards"
+            >
+              <PencilSimple className="w-3.5 h-3.5" weight="bold" />
+            </button>
+          </div>
           <div className="flex flex-col gap-3">
             {profile.awards.map((a) => (
               <Card key={a.id} variant="flat" padding="compact">
@@ -474,6 +621,19 @@ export default function ProfilePage() {
             ))}
           </div>
         </div>
+      ) : profile && (
+        <div className="mb-6 animate-fade-up" style={{ animationDelay: "350ms" }}>
+          <SectionHeader>Awards & Recognition</SectionHeader>
+          <Card variant="sunken" className="text-center py-12">
+            <Trophy className="w-12 h-12 text-clay-300 mx-auto mb-3" weight="duotone" />
+            <p className="text-sm text-clay-500 mb-4">
+              Add awards and nominations to highlight your achievements.
+            </p>
+            <Button size="sm" variant="outline" onClick={() => setAwardEditOpen(true)}>
+              Add an Award
+            </Button>
+          </Card>
+        </div>
       )}
 
       {/* ===== SPECIAL SKILLS ===== */}
@@ -490,27 +650,9 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* ===== UNION STATUS ===== */}
-      {profile && (
-        <div className="mb-6 animate-fade-up" style={{ animationDelay: "450ms" }}>
-          <SectionHeader>Union Status</SectionHeader>
-          <Card variant="flat" padding="compact">
-            <div className="flex items-center gap-2">
-              <IdentificationBadge
-                className="w-5 h-5 text-stage-500"
-                weight="duotone"
-              />
-              <span className="text-sm text-curtain-800">
-                {UNION_LABELS[profile.unionStatus] ?? profile.unionStatus}
-              </span>
-            </div>
-          </Card>
-        </div>
-      )}
-
       {/* ===== MEASUREMENTS (private) ===== */}
       {measurementGroups.length > 0 ? (
-        <div className="mb-6 animate-fade-up" style={{ animationDelay: "500ms" }}>
+        <div className="mb-6 animate-fade-up" style={{ animationDelay: "450ms" }}>
           <PrivacyHeader title="Measurements" />
           <div className="flex flex-col gap-6">
             {measurementGroups.map((group) => (
@@ -532,7 +674,7 @@ export default function ProfilePage() {
           </div>
         </div>
       ) : (
-        <div className="mb-6 animate-fade-up" style={{ animationDelay: "500ms" }}>
+        <div className="mb-6 animate-fade-up" style={{ animationDelay: "450ms" }}>
           <PrivacyHeader title="Measurements" />
           <Card variant="sunken" className="text-center py-12">
             <p className="text-sm text-clay-500">
@@ -551,32 +693,112 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* ===== PHOTOS (coming soon) ===== */}
-      <div className="mb-6 animate-fade-up" style={{ animationDelay: "550ms" }}>
-        <SectionHeader>Photos</SectionHeader>
-        <Card variant="sunken" className="text-center py-12">
-          <Images
-            className="w-12 h-12 text-clay-300 mx-auto mb-3"
-            weight="duotone"
+      {/* ===== RESUME (private, cloud only) ===== */}
+      {isSupabaseConfigured && profile && (
+        <div className="mb-6 animate-fade-up" style={{ animationDelay: "475ms" }}>
+          <ResumeSection userId={actor.id} resumePath={profile.resumePdfUrl} />
+        </div>
+      )}
+
+      {/* ===== PHOTOS ===== */}
+      <div className="mb-6 animate-fade-up" style={{ animationDelay: "500ms" }}>
+        {isSupabaseConfigured ? (
+          <PhotoSection
+            ref={photoSectionRef}
+            userId={actor.id}
+            displayName={actor.displayName}
           />
-          <p className="text-sm font-semibold text-curtain-900 mb-1">
-            Headshots & Production Photos
-          </p>
-          <p className="text-xs text-clay-500 mb-4 max-w-xs mx-auto">
-            Upload headshots and tag your production photos so directors can see
-            your range.
-          </p>
-          <Badge variant="default" size="sm">
-            Coming Soon
-          </Badge>
-        </Card>
+        ) : (
+          <>
+            <SectionHeader>Photos</SectionHeader>
+            <Card variant="sunken" className="text-center py-12">
+              <Images
+                className="w-12 h-12 text-clay-300 mx-auto mb-3"
+                weight="duotone"
+              />
+              <p className="text-sm font-semibold text-curtain-900 mb-1">
+                Headshots & Production Photos
+              </p>
+              <p className="text-xs text-clay-500 mb-4 max-w-xs mx-auto">
+                Upload headshots and tag your production photos so directors can
+                see your range.
+              </p>
+              <Badge variant="default" size="sm">
+                Coming Soon
+              </Badge>
+            </Card>
+          </>
+        )}
       </div>
 
-      {/* Edit Modal */}
+      {/* ===== HIDDEN FIELDS (actor-only reminder) ===== */}
+      {profile && (profile.accessibilityNeeds || profile.dealbreakers.length > 0) && (
+        <div className="mb-6 animate-fade-up" style={{ animationDelay: "550ms" }}>
+          <div className="flex items-center gap-1.5 mb-3">
+            <h3 className="text-xs font-semibold text-curtain-700 tracking-wide uppercase">
+              Your Private Notes
+            </h3>
+            <EyeSlash className="w-3 h-3 text-clay-400" weight="duotone" />
+            <span className="text-[10px] text-clay-400">
+              Only visible to you
+            </span>
+          </div>
+          <Card variant="flat" padding="compact">
+            <div className="flex flex-col gap-3">
+              {profile.accessibilityNeeds && (
+                <div>
+                  <p className="text-[10px] font-semibold text-clay-400 tracking-wide uppercase mb-1">
+                    Accessibility & Accommodations
+                  </p>
+                  <p className="text-sm text-curtain-800">
+                    {profile.accessibilityNeeds}
+                  </p>
+                </div>
+              )}
+              {profile.dealbreakers.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-semibold text-clay-400 tracking-wide uppercase mb-1">
+                    Dealbreakers
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {profile.dealbreakers.map((d) => (
+                      <Pill key={d} variant="role" className="cursor-default text-xs">
+                        {d}
+                      </Pill>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Edit Modals */}
       <ProfileEditModal
         actor={actor}
         open={editOpen}
         onClose={() => setEditOpen(false)}
+      />
+      <CreditEditModal
+        actor={actor}
+        open={creditEditOpen}
+        onClose={() => setCreditEditOpen(false)}
+      />
+      <CrewCreditEditModal
+        actor={actor}
+        open={crewEditOpen}
+        onClose={() => setCrewEditOpen(false)}
+      />
+      <TrainingEditModal
+        actor={actor}
+        open={trainingEditOpen}
+        onClose={() => setTrainingEditOpen(false)}
+      />
+      <AwardEditModal
+        actor={actor}
+        open={awardEditOpen}
+        onClose={() => setAwardEditOpen(false)}
       />
     </div>
   );

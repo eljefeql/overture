@@ -11,6 +11,7 @@ import {
   getTeamNotes,
   getActor,
   getCallbacks,
+  getShowTeam,
   updateSignupStatus,
   updateShow,
   createCallback,
@@ -38,6 +39,8 @@ import { TeamNotesFeed } from "@/components/casting/TeamNotesFeed";
 import { useUIStore } from "@/stores/useUIStore";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/features/auth/AuthContext";
+import { useOrg } from "@/features/auth/useOrg";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { formatTime, formatHeight, formatDate } from "@/lib/utils";
 import {
   MagnifyingGlass,
@@ -72,6 +75,7 @@ export default function AuditionsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { user, activeRole } = useAuth();
+  const { org, role: orgRole } = useOrg();
   const panel = useUIStore((s) => s.panel);
   const openActorPanel = useUIStore((s) => s.openActorPanel);
   const closePanel = useUIStore((s) => s.closePanel);
@@ -100,6 +104,22 @@ export default function AuditionsPage() {
       return { show, roles, groups, signups, callbacks: cbs };
     },
   });
+
+  // Evaluation permission (cloud): org owner/admin of this show's org always
+  // may evaluate; show-team members need can_evaluate. Mock mode allows all.
+  const { data: showTeamMembers } = useQuery({
+    queryKey: ["showTeam", showId],
+    queryFn: () => getShowTeam(showId),
+    enabled: isSupabaseConfigured && !!user,
+  });
+  const isOrgAdmin =
+    !!org &&
+    (orgRole === "owner" || orgRole === "admin") &&
+    org.id === data?.show?.orgId;
+  const canEvaluate =
+    !isSupabaseConfigured ||
+    isOrgAdmin ||
+    (showTeamMembers?.some((m) => m.userId === user?.id && m.canEvaluate) ?? false);
 
   // Panel actor data
   const selectedActorId = panel.type === "actor" ? panel.actorId : null;
@@ -418,17 +438,19 @@ export default function AuditionsPage() {
           ))}
         </div>
 
-        {/* Batch toggle */}
-        <Button
-          variant={batchMode ? "secondary" : "outline"}
-          size="sm"
-          onClick={() => {
-            setBatchMode(!batchMode);
-            clearSelection();
-          }}
-        >
-          {batchMode ? "Exit Batch" : "Batch"}
-        </Button>
+        {/* Batch toggle (evaluators only) */}
+        {canEvaluate && (
+          <Button
+            variant={batchMode ? "secondary" : "outline"}
+            size="sm"
+            onClick={() => {
+              setBatchMode(!batchMode);
+              clearSelection();
+            }}
+          >
+            {batchMode ? "Exit Batch" : "Batch"}
+          </Button>
+        )}
       </div>
 
       {/* ── Batch Action Bar ── */}
@@ -515,8 +537,8 @@ export default function AuditionsPage() {
                         </Badge>
                       </div>
 
-                      {/* ── Action Menu (not in batch mode) ── */}
-                      {!batchMode && (
+                      {/* ── Action Menu (evaluators only, not in batch mode) ── */}
+                      {!batchMode && canEvaluate && (
                         <div className="relative mt-2 pt-2 border-t border-cream-100 flex items-center gap-1">
                           {signup.status === "signed_up" && (
                             <button
@@ -759,8 +781,8 @@ export default function AuditionsPage() {
               </div>
             )}
 
-            {/* Panel actions */}
-            {panelSignup && (
+            {/* Panel actions (evaluators only) */}
+            {panelSignup && canEvaluate && (
               <div className="flex flex-wrap gap-2 animate-fade-up" style={{ animationDelay: "100ms" }}>
                 {panelSignup.status === "signed_up" && (
                   <Button

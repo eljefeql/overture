@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   getShow,
   getShowRoles,
@@ -41,8 +41,9 @@ import {
   Envelope,
   Buildings,
   ShareNetwork,
-  BookmarkSimple,
   CalendarPlus,
+  LockSimple,
+  UsersThree,
   CaretDown,
   CaretUp,
   Megaphone,
@@ -89,6 +90,7 @@ export default function AuditionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const { toast } = useToast();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
@@ -166,6 +168,11 @@ export default function AuditionDetailPage() {
               : `${c.startDate} to ${c.endDate}`
           )
           .join(", "),
+        isMember: data.isMember,
+        mailingList: data.mailingList,
+        referralSource: data.referralSource,
+        mediaConsent: data.mediaConsent,
+        commitmentAcknowledged: data.commitmentAcknowledged,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["actorSignup", id] });
@@ -226,6 +233,57 @@ export default function AuditionDetailPage() {
       ? groups?.find((g) => g.id === existingSignup.groupId)
       : null;
 
+  // Public social proof — total signups across all slots (count only, never names)
+  const signupCount = slotAvailability?.reduce((sum, g) => sum + g.taken, 0) ?? 0;
+
+  async function handleShare() {
+    const url = window.location.href;
+    const shareData = {
+      title: `${show!.title} — Auditions`,
+      text: `${show!.orgName} is casting ${show!.title}. Auditions are open!`,
+      url,
+    };
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+      } catch {
+        /* user dismissed the share sheet */
+      }
+    } else {
+      await navigator.clipboard.writeText(url);
+      toast("success", "Link copied to clipboard!");
+    }
+  }
+
+  function handleAddToCalendar() {
+    if (!signedUpGroup || !show) return;
+    const fmt = (iso: string) =>
+      new Date(iso).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Overture//Community Theatre Casting//EN",
+      "BEGIN:VEVENT",
+      `UID:${id}-${signedUpGroup.id}@overture`,
+      `DTSTAMP:${fmt(signedUpGroup.startTime)}`,
+      `DTSTART:${fmt(signedUpGroup.startTime)}`,
+      `DTEND:${fmt(signedUpGroup.endTime)}`,
+      `SUMMARY:Audition — ${show.title} (${show.orgName})`,
+      show.auditionLocation ? `LOCATION:${show.auditionLocation}` : "",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ]
+      .filter(Boolean)
+      .join("\r\n");
+    const blob = new Blob([ics], { type: "text/calendar" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `audition-${show.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.ics`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast("success", "Calendar file downloaded!");
+  }
+
   // Status badge for the show header
   const statusBadge = (() => {
     switch (phase) {
@@ -256,34 +314,42 @@ export default function AuditionDetailPage() {
       </Link>
 
       {/* Show header */}
-      <div className="mb-4">
-        <div className="flex items-center gap-3 mb-2">
-          <h1 className="text-3xl font-display text-curtain-900">
-            {show.title}
-          </h1>
-          {statusBadge}
-        </div>
-        <p className="inline-flex items-center gap-1.5 text-sm text-curtain-600">
-          <Buildings className="w-4 h-4 text-stage-500" weight="duotone" />
-          {show.orgName}
-        </p>
-        {show.authorInfo && (
-          <p className="text-xs text-clay-400 mt-1">{show.authorInfo}</p>
+      <div className="mb-4 flex items-start gap-4">
+        {show.posterUrl && (
+          <img
+            src={show.posterUrl}
+            alt={`${show.title} poster`}
+            className="w-20 h-28 rounded-xl object-cover flex-shrink-0 bg-cream-100"
+          />
         )}
+        <div className="min-w-0">
+          <div className="flex items-center gap-3 mb-2">
+            <h1 className="text-3xl font-display text-curtain-900">
+              {show.title}
+            </h1>
+            {statusBadge}
+          </div>
+          <Link
+            href={`/theatres/${show.orgId}`}
+            className="inline-flex items-center gap-1.5 text-sm text-curtain-600 hover:text-curtain-900 transition"
+          >
+            <Buildings className="w-4 h-4 text-stage-500" weight="duotone" />
+            {show.orgName}
+          </Link>
+          {show.authorInfo && (
+            <p className="text-xs text-clay-400 mt-1">{show.authorInfo}</p>
+          )}
+        </div>
       </div>
 
       {/* Action bar */}
       <div className="flex items-center gap-2 mb-6">
-        <button onClick={() => toast("info", "Coming soon!")} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-cream-300 text-xs font-medium text-clay-500 hover:border-curtain-300 hover:text-curtain-700 transition">
-          <BookmarkSimple className="w-4 h-4" weight="bold" />
-          Save
-        </button>
-        <button onClick={() => toast("info", "Coming soon!")} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-cream-300 text-xs font-medium text-clay-500 hover:border-curtain-300 hover:text-curtain-700 transition">
+        <button onClick={handleShare} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-cream-300 text-xs font-medium text-clay-500 hover:border-curtain-300 hover:text-curtain-700 transition">
           <ShareNetwork className="w-4 h-4" weight="bold" />
           Share
         </button>
-        {isSignedUp && (
-          <button onClick={() => toast("info", "Coming soon!")} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-cream-300 text-xs font-medium text-clay-500 hover:border-curtain-300 hover:text-curtain-700 transition">
+        {isSignedUp && signedUpGroup && (
+          <button onClick={handleAddToCalendar} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-cream-300 text-xs font-medium text-clay-500 hover:border-curtain-300 hover:text-curtain-700 transition">
             <CalendarPlus className="w-4 h-4" weight="bold" />
             Add to Calendar
           </button>
@@ -789,6 +855,8 @@ export default function AuditionDetailPage() {
         <>
           <EventInfoBlocks show={show} />
 
+          <AuditionScheduleByDay groups={groups} />
+
           {show.auditionNotes && (
             <Card variant="sunken" className="mb-8">
               <SectionHeader>Audition Instructions</SectionHeader>
@@ -800,11 +868,21 @@ export default function AuditionDetailPage() {
 
           <RolesList roles={roles} />
 
-          <ContactBlock
-            show={show}
-            stageManager={stageManager}
-            phase={phase}
-          />
+          {/* People-layer gating: team contact info requires an account */}
+          {user ? (
+            <ContactBlock
+              show={show}
+              stageManager={stageManager}
+              phase={phase}
+            />
+          ) : (
+            <Card variant="sunken" padding="compact" className="mb-6">
+              <p className="flex items-center gap-2 text-xs text-clay-500">
+                <LockSimple className="w-4 h-4 text-clay-400" weight="duotone" />
+                Production team contact info is visible to signed-in members.
+              </p>
+            </Card>
+          )}
         </>
       )}
 
@@ -828,10 +906,23 @@ export default function AuditionDetailPage() {
       {/* Sticky CTA (pre-signup only) */}
       {phase === "browsing" && (
         <div className="sticky bottom-0 bg-cream-50/95 backdrop-blur-sm py-4 -mx-6 px-6 border-t border-cream-200">
+          {signupCount > 0 && (
+            <p className="flex items-center justify-center gap-1.5 text-xs text-clay-500 mb-2">
+              <UsersThree className="w-4 h-4 text-stage-500" weight="duotone" />
+              {signupCount} actor{signupCount !== 1 ? "s have" : " has"} signed up
+            </p>
+          )}
           <Button
             size="lg"
             className="w-full"
-            onClick={() => setShowModal(true)}
+            onClick={() => {
+              if (user) {
+                setShowModal(true);
+              } else {
+                // Sign-up wall: through signup/onboarding, then back here
+                router.push(`/signup?next=${encodeURIComponent(`/auditions/${id}`)}`);
+              }
+            }}
           >
             Sign Up to Audition
           </Button>
@@ -1238,6 +1329,67 @@ function RolesList({ roles }: { roles: ShowRole[] | undefined }) {
                   {role.vocalRange && <span>{role.vocalRange}</span>}
                 </div>
               </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   Audition schedule — blocks grouped under day headings
+   ("Saturday, Sep 12"). Read-only public view of the day-based
+   blocks; the signup modal handles actual slot selection.
+   ============================================================ */
+
+function AuditionScheduleByDay({
+  groups,
+}: {
+  groups: import("@/types").AuditionGroup[] | undefined;
+}) {
+  if (!groups || groups.length === 0) return null;
+
+  const byDay = new Map<string, typeof groups>();
+  for (const g of groups) {
+    const key = new Date(g.startTime).toISOString().slice(0, 10);
+    const arr = byDay.get(key) ?? [];
+    arr.push(g);
+    byDay.set(key, arr);
+  }
+  const days = [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, blocks]) => ({
+      key,
+      label: new Date(blocks[0].startTime).toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "short",
+        day: "numeric",
+      }),
+      blocks: blocks
+        .slice()
+        .sort((x, y) => x.startTime.localeCompare(y.startTime)),
+    }));
+
+  return (
+    <div className="mb-8">
+      <SectionHeader>Audition Times</SectionHeader>
+      <div className="flex flex-col gap-4">
+        {days.map((day) => (
+          <Card key={day.key} variant="flat" padding="compact">
+            <p className="text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-2">
+              {day.label}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {day.blocks.map((block) => (
+                <span
+                  key={block.id}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-curtain-800 bg-white rounded-lg px-2.5 py-1 border border-cream-200"
+                >
+                  <Clock className="w-3.5 h-3.5 text-stage-500" weight="duotone" />
+                  {formatTime(block.startTime)}
+                </span>
+              ))}
             </div>
           </Card>
         ))}

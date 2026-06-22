@@ -31,7 +31,10 @@ export type Award = {
   year: number;
 };
 
-export type UnionStatus = "non_union" | "aea" | "sag_aftra" | "aea_sag";
+export type BucketListShow = {
+  title: string;
+  role: string | null;
+};
 
 export type Pronouns =
   | "she/her"
@@ -57,16 +60,17 @@ export type ActorProfile = {
   isAvailable: boolean;
   resumePdfUrl: string | null;
   isMinor: boolean;
+  guardianName: string | null;
   guardianEmail: string | null;
+  guardianPhone: string | null;
   phone: string | null;
-  addressLine1: string | null;
-  addressCity: string | null;
-  addressState: string | null;
-  addressZip: string | null;
+  appearanceDescription: string | null;
+  bucketListShows: BucketListShow[];
+  accessibilityNeeds: string | null;
+  dealbreakers: string[];
   measurements: ActorMeasurements | null;
   training: Training[];
   awards: Award[];
-  unionStatus: UnionStatus;
 } & Timestamps;
 
 export type User = {
@@ -81,6 +85,7 @@ export type User = {
 export type ActorWithProfile = User & {
   profile: ActorProfile | null;
   credits: ProductionCredit[];
+  crewCredits: CrewCredit[];
   endorsements: Endorsement[];
 };
 
@@ -100,6 +105,21 @@ export type ProductionCredit = {
   orgId: ID | null;
   likeCount: number;
   kudos: Kudos | null;
+};
+
+/**
+ * Crew/production work — separate identity from acting credits.
+ * The same person can be an actor AND a stage manager / designer / director;
+ * these render in their own "Production Work" profile section.
+ */
+export type CrewCredit = {
+  id: ID;
+  position: string; // "Stage Manager", "Costume Designer", "Director"...
+  showTitle: string;
+  theatreName: string;
+  year: number;
+  verified: boolean;
+  orgId: ID | null;
 };
 
 export type Endorsement = {

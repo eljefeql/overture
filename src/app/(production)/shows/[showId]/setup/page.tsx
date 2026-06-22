@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -20,6 +20,8 @@ import {
   updateAuditionGroup,
   deleteAuditionGroup,
 } from "@/lib/api/client";
+import { uploadShowPoster } from "@/lib/api/photos";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
   Card,
   CardHeader,
@@ -37,7 +39,7 @@ import {
 } from "@/components/ui";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/features/auth/AuthContext";
-import { formatDate, formatTeamRole } from "@/lib/utils";
+import { formatDate, formatTime, formatTeamRole } from "@/lib/utils";
 import {
   PencilSimple,
   Plus,
@@ -50,6 +52,15 @@ import {
   MapPin,
   Users,
   MaskHappy,
+  CheckCircle,
+  Circle,
+  ListChecks,
+  Megaphone,
+  Lightning,
+  Image as ImageIcon,
+  ArrowSquareOut,
+  LinkSimple,
+  Clock,
 } from "@phosphor-icons/react";
 import { SHOW_STATUS_LABELS } from "@/lib/constants";
 import type { ShowStatus, ShowType, RoleType, GenderReq, TeamRole } from "@/types";
@@ -97,6 +108,31 @@ const TEAM_ROLES: { value: TeamRole; label: string }[] = [
   { value: "accompanist", label: "Accompanist" },
 ];
 
+/**
+ * Group audition blocks under day headings ("Saturday, Sep 12"), days in
+ * chronological order, blocks within a day sorted by start time.
+ */
+function groupBlocksByDay<T extends { startTime: string }>(blocks: T[]) {
+  const byDay = new Map<string, T[]>();
+  for (const b of blocks) {
+    const dateKey = new Date(b.startTime).toISOString().slice(0, 10);
+    const arr = byDay.get(dateKey) ?? [];
+    arr.push(b);
+    byDay.set(dateKey, arr);
+  }
+  return [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([dateKey, dayBlocks]) => ({
+      dateKey,
+      label: new Date(dayBlocks[0].startTime).toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "short",
+        day: "numeric",
+      }),
+      blocks: dayBlocks.sort((x, y) => x.startTime.localeCompare(y.startTime)),
+    }));
+}
+
 export default function ShowSetupPage() {
   const { showId } = useParams<{ showId: string }>();
   const router = useRouter();
@@ -112,6 +148,13 @@ export default function ShowSetupPage() {
   const [editRoleId, setEditRoleId] = useState<string | null>(null);
   const [addSlotOpen, setAddSlotOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
+  const [callbackOpen, setCallbackOpen] = useState(false);
+
+  // Callback scheduling form
+  const [callbackForm, setCallbackForm] = useState({
+    callbackDate: "", callbackStartTime: "", callbackEndTime: "",
+    callbackLocation: "", callbackNotes: "",
+  });
 
   // Edit details form
   const [editForm, setEditForm] = useState({
@@ -134,9 +177,9 @@ export default function ShowSetupPage() {
     ageRange: "", vocalRange: "", description: "",
   });
 
-  // Add slot form — date is the audition day, times are HH:MM
-  const [slotDraft, setSlotDraft] = useState({
-    name: "", date: "", startTime: "", endTime: "", slotCount: 5,
+  // Generate-day form — one day → many auto-generated blocks.
+  const [genDraft, setGenDraft] = useState({
+    date: "", startTime: "18:00", endTime: "21:00", blockMinutes: 30, capacity: 5,
   });
 
   // Add member form
@@ -185,6 +228,17 @@ export default function ShowSetupPage() {
     onError: (err: Error) => toast("error", err.message),
   });
 
+  const callbackMutation = useMutation({
+    mutationFn: (updates: Record<string, unknown>) => updateShow(showId, updates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["showSetup", showId] });
+      queryClient.invalidateQueries({ queryKey: ["show", showId] });
+      toast("success", "Callback details saved!");
+      setCallbackOpen(false);
+    },
+    onError: (err: Error) => toast("error", err.message),
+  });
+
   const addRoleMutation = useMutation({
     mutationFn: createShowRole,
     onSuccess: () => {
@@ -216,12 +270,18 @@ export default function ShowSetupPage() {
     },
   });
 
-  const addSlotMutation = useMutation({
-    mutationFn: createAuditionGroup,
-    onSuccess: () => {
+  const generateDayMutation = useMutation({
+    mutationFn: async (blocks: Omit<typeof groups[0], "id">[]) => {
+      // Create the blocks sequentially so sort_order stays stable.
+      for (const block of blocks) {
+        await createAuditionGroup(block);
+      }
+      return blocks.length;
+    },
+    onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ["showSetup", showId] });
-      toast("success", "Time slot added!");
-      setSlotDraft({ name: "", date: "", startTime: "", endTime: "", slotCount: 5 });
+      toast("success", `Generated ${count} audition ${count === 1 ? "block" : "blocks"}!`);
+      setGenDraft({ date: "", startTime: "18:00", endTime: "21:00", blockMinutes: 30, capacity: 5 });
       setAddSlotOpen(false);
     },
     onError: (err: Error) => toast("error", err.message),
@@ -268,6 +328,22 @@ export default function ShowSetupPage() {
 
   const { show, roles, team, groups, signups, callbacks: cbs } = data;
   const nextAction = NEXT_STATUS[show.status];
+
+  // ── Checklist state (only meaningful while the show is being set up) ──
+  const hasRoles = roles.length > 0;
+  const hasTeam = team.length > 1; // creator counts as one; >1 means they invited someone
+  const hasSchedule = groups.length > 0;
+  const isLive = show.status !== "setup";
+  // "Open auditions" is the final step — done once the show has left setup.
+  const checklistSteps = [
+    { key: "created", label: "Show created", done: true, optional: false, action: null as null | (() => void), cta: "" },
+    { key: "roles", label: "Add roles", done: hasRoles, optional: false, action: () => setAddRoleOpen(true), cta: hasRoles ? "Add more" : "Add a role" },
+    { key: "team", label: "Build your team", done: hasTeam, optional: true, action: () => setAddMemberOpen(true), cta: hasTeam ? "Manage" : "Invite" },
+    { key: "schedule", label: "Schedule auditions", done: hasSchedule, optional: false, action: () => setAddSlotOpen(true), cta: hasSchedule ? "Add a day" : "Schedule" },
+    { key: "open", label: "Open auditions", done: isLive, optional: false, action: () => setConfirmOpen(true), cta: "Open" },
+  ];
+  const requiredDone = checklistSteps.filter((s) => !s.optional && s.done).length;
+  const requiredTotal = checklistSteps.filter((s) => !s.optional).length;
 
   // Stats
   const signupCount = signups.length;
@@ -389,33 +465,71 @@ export default function ShowSetupPage() {
   })();
   const singleAuditionDate = auditionDates.length === 1 ? auditionDates[0] : null;
 
-  const submitSlot = () => {
-    if (!slotDraft.name.trim() || !slotDraft.startTime || !slotDraft.endTime) {
-      toast("error", "Name, start time, and end time are required.");
+  // Format an HH:MM (24h) string into a friendly "6:00 PM" label.
+  const labelFromTime = (hhmm: string) => {
+    const [h, m] = hhmm.split(":").map(Number);
+    const date = new Date();
+    date.setHours(h, m, 0, 0);
+    return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  };
+
+  // Compute the blocks the current generate form would produce (preview).
+  const computeBlocks = () => {
+    const dateStr = genDraft.date || singleAuditionDate || show.auditionStart || "";
+    if (!dateStr || !genDraft.startTime || !genDraft.endTime) return [];
+    const start = new Date(`${dateStr}T${genDraft.startTime}:00`);
+    const end = new Date(`${dateStr}T${genDraft.endTime}:00`);
+    const stepMs = genDraft.blockMinutes * 60 * 1000;
+    if (!(end > start) || stepMs <= 0) return [];
+    const blocks: { name: string; startTime: string; endTime: string; slotCount: number }[] = [];
+    let cursor = start.getTime();
+    let guard = 0;
+    while (cursor < end.getTime() && guard < 200) {
+      const blockStart = new Date(cursor);
+      const blockEnd = new Date(Math.min(cursor + stepMs, end.getTime()));
+      blocks.push({
+        name: blockStart.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+        startTime: blockStart.toISOString(),
+        endTime: blockEnd.toISOString(),
+        slotCount: genDraft.capacity,
+      });
+      cursor += stepMs;
+      guard++;
+    }
+    return blocks;
+  };
+
+  const previewBlocks = computeBlocks();
+
+  const submitGenerateDay = () => {
+    const dateStr = genDraft.date || singleAuditionDate || show.auditionStart || "";
+    if (!dateStr) {
+      toast("error", "Pick an audition date first.");
       return;
     }
-    if (slotDraft.endTime <= slotDraft.startTime) {
+    if (genDraft.endTime <= genDraft.startTime) {
       toast("error", "End time must be after start time.");
       return;
     }
-    // Date: prefer slotDraft.date, then single audition date, then auditionStart
-    const dateStr =
-      slotDraft.date || singleAuditionDate || show.auditionStart || "";
-    if (!dateStr) {
-      toast("error", "Set the audition date in show details before adding time slots.");
+    if (genDraft.blockMinutes <= 0) {
+      toast("error", "Block length must be at least 1 minute.");
       return;
     }
-    // Combine date + time into a local ISO string
-    const startISO = new Date(`${dateStr}T${slotDraft.startTime}:00`).toISOString();
-    const endISO = new Date(`${dateStr}T${slotDraft.endTime}:00`).toISOString();
-    addSlotMutation.mutate({
-      showId,
-      name: slotDraft.name.trim(),
-      startTime: startISO,
-      endTime: endISO,
-      slotCount: slotDraft.slotCount,
-      sortOrder: groups.length,
-    });
+    const blocks = computeBlocks();
+    if (blocks.length === 0) {
+      toast("error", "That window doesn't produce any blocks — check your times.");
+      return;
+    }
+    generateDayMutation.mutate(
+      blocks.map((b, i) => ({
+        showId,
+        name: b.name,
+        startTime: b.startTime,
+        endTime: b.endTime,
+        slotCount: b.slotCount,
+        sortOrder: groups.length + i,
+      }))
+    );
   };
 
   const submitMember = () => {
@@ -433,6 +547,69 @@ export default function ShowSetupPage() {
       phone: memberDraft.phone || null,
     });
   };
+
+  // Times are stored as full timestamps (e.g. "2026-04-16T18:00:00"); the
+  // <input type="time"> needs "HH:MM". Extract one from either format.
+  const toInputTime = (v: string | null) => {
+    if (!v) return "";
+    const m = /T(\d{2}:\d{2})/.exec(v);
+    if (m) return m[1];
+    if (/^\d{2}:\d{2}/.test(v)) return v.slice(0, 5);
+    return "";
+  };
+
+  const openCallback = () => {
+    setCallbackForm({
+      callbackDate: show.callbackDate ?? "",
+      callbackStartTime: toInputTime(show.callbackStartTime),
+      callbackEndTime: toInputTime(show.callbackEndTime),
+      callbackLocation: show.callbackLocation ?? "",
+      callbackNotes: show.callbackNotes ?? "",
+    });
+    setCallbackOpen(true);
+  };
+
+  const submitCallback = () => {
+    if (
+      callbackForm.callbackStartTime &&
+      callbackForm.callbackEndTime &&
+      callbackForm.callbackEndTime <= callbackForm.callbackStartTime
+    ) {
+      toast("error", "Callback end time must be after the start time.");
+      return;
+    }
+    // Rebuild full timestamps anchored to the callback date (fallback: today).
+    const dateAnchor = callbackForm.callbackDate || new Date().toISOString().slice(0, 10);
+    const toTimestamp = (hhmm: string) => (hhmm ? `${dateAnchor}T${hhmm}:00` : null);
+    callbackMutation.mutate({
+      callbackDate: callbackForm.callbackDate || null,
+      callbackStartTime: toTimestamp(callbackForm.callbackStartTime),
+      callbackEndTime: toTimestamp(callbackForm.callbackEndTime),
+      callbackLocation: callbackForm.callbackLocation.trim() || null,
+      callbackNotes: callbackForm.callbackNotes.trim() || null,
+    });
+  };
+
+  const publicAuditionUrl =
+    typeof window !== "undefined" ? `${window.location.origin}/auditions/${showId}` : `/auditions/${showId}`;
+
+  const copyPublicLink = async () => {
+    try {
+      await navigator.clipboard.writeText(publicAuditionUrl);
+      toast("success", "Public link copied to clipboard!");
+    } catch {
+      toast("error", "Couldn't copy — try again.");
+    }
+  };
+
+  const formatTimeRange = (start: string | null, end: string | null) => {
+    if (start && end) return `${formatTime(start)} – ${formatTime(end)}`;
+    if (start) return formatTime(start);
+    return "";
+  };
+
+  const hasCallbackInfo =
+    show.callbackDate || show.callbackStartTime || show.callbackLocation || show.callbackNotes;
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
@@ -463,6 +640,62 @@ export default function ShowSetupPage() {
           </Button>
         )}
       </div>
+
+      {/* ── Progress Checklist (lead with this while setting up) ── */}
+      {show.status === "setup" && (
+        <Card variant="elevated" className="mb-6 animate-fade-up" style={{ animationDelay: "25ms" }}>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <ListChecks className="w-5 h-5 text-stage-500" weight="duotone" />
+              <CardTitle>Get this show ready</CardTitle>
+            </div>
+            <span className="text-xs font-semibold text-clay-500">
+              {requiredDone}/{requiredTotal} essentials
+            </span>
+          </CardHeader>
+          <p className="text-sm text-clay-500 -mt-2 mb-4">
+            Nothing here is public until you open auditions. Work through these at your own pace.
+          </p>
+          <div className="flex flex-col gap-2">
+            {checklistSteps.map((step) => (
+              <div
+                key={step.key}
+                className="flex items-center justify-between py-2 border-b border-cream-100 last:border-0"
+              >
+                <div className="flex items-center gap-2.5">
+                  {step.done ? (
+                    <CheckCircle className="w-5 h-5 text-forest-500 flex-shrink-0" weight="fill" />
+                  ) : (
+                    <Circle className="w-5 h-5 text-clay-300 flex-shrink-0" weight="duotone" />
+                  )}
+                  <span className={`text-sm font-medium ${step.done ? "text-clay-400 line-through" : "text-curtain-900"}`}>
+                    {step.label}
+                  </span>
+                  {step.optional && (
+                    <span className="text-[10px] font-semibold text-clay-400 uppercase tracking-wide">Optional</span>
+                  )}
+                </div>
+                {step.action && (
+                  step.key === "open" ? (
+                    <Button
+                      size="sm"
+                      variant={hasRoles && hasSchedule ? "primary" : "outline"}
+                      onClick={step.action}
+                      icon={<Megaphone className="w-4 h-4" weight={hasRoles && hasSchedule ? "bold" : "duotone"} />}
+                    >
+                      {step.cta}
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="ghost" onClick={step.action} icon={<ArrowRight className="w-3.5 h-3.5" weight="bold" />}>
+                      {step.cta}
+                    </Button>
+                  )
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* ── Stats Row ── */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6 animate-fade-up" style={{ animationDelay: "50ms" }}>
@@ -512,6 +745,14 @@ export default function ShowSetupPage() {
             </div>
           </Card>
 
+          {/* Poster Card */}
+          <PosterCard
+            orgId={show.orgId}
+            showId={show.id}
+            title={show.title}
+            posterUrl={show.posterUrl}
+          />
+
           {/* Roles Card */}
           <Card variant="elevated" className="animate-fade-up" style={{ animationDelay: "150ms" }}>
             <CardHeader>
@@ -552,42 +793,93 @@ export default function ShowSetupPage() {
           {/* Schedule Card */}
           <Card variant="elevated" className="animate-fade-up" style={{ animationDelay: "200ms" }}>
             <CardHeader>
-              <CardTitle>Audition Schedule ({groups.length} slots)</CardTitle>
-              <Button variant="ghost" size="sm" onClick={() => setAddSlotOpen(true)} icon={<Plus className="w-4 h-4" weight="bold" />}>
-                Add
+              <CardTitle>Audition Schedule ({groups.length} blocks)</CardTitle>
+              <Button variant="ghost" size="sm" onClick={() => setAddSlotOpen(true)} icon={<Lightning className="w-4 h-4" weight="bold" />}>
+                Generate a Day
               </Button>
             </CardHeader>
             {groups.length > 0 ? (
-              <div className="flex flex-col gap-2">
-                {groups.map((group) => {
-                  const filled = signups.filter((s) => s.groupId === group.id).length;
-                  return (
-                    <div key={group.id} className="flex items-center justify-between py-2 border-b border-cream-100 last:border-0">
-                      <div>
-                        <span className="text-sm font-semibold text-curtain-900">{group.name}</span>
-                        <span className="text-xs text-clay-500 ml-2">
-                          {new Date(group.startTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-                          {" – "}
-                          {new Date(group.endTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xs font-medium ${filled >= group.slotCount ? "text-ruby-500" : "text-clay-500"}`}>
-                          {filled}/{group.slotCount} filled{filled >= group.slotCount ? " · Full" : ""}
-                        </span>
-                        <button
-                          onClick={() => deleteGroupMutation.mutate(group.id)}
-                          className="text-clay-300 hover:text-ruby-500 transition p-1"
-                        >
-                          <Trash className="w-4 h-4" weight="bold" />
-                        </button>
-                      </div>
+              <div className="flex flex-col gap-4">
+                {groupBlocksByDay(groups).map((day) => (
+                  <div key={day.dateKey}>
+                    <p className="text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-2">
+                      {day.label}
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      {day.blocks.map((group) => {
+                        const filled = signups.filter((s) => s.groupId === group.id).length;
+                        return (
+                          <div key={group.id} className="flex items-center justify-between py-2 border-b border-cream-100 last:border-0">
+                            <span className="text-sm font-semibold text-curtain-900">
+                              {new Date(group.startTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                              {" – "}
+                              {new Date(group.endTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className={`text-xs font-medium ${filled >= group.slotCount ? "text-ruby-500" : "text-clay-500"}`}>
+                                {filled}/{group.slotCount} filled{filled >= group.slotCount ? " · Full" : ""}
+                              </span>
+                              <button
+                                onClick={() => deleteGroupMutation.mutate(group.id)}
+                                className="text-clay-300 hover:text-ruby-500 transition p-1"
+                              >
+                                <Trash className="w-4 h-4" weight="bold" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             ) : (
               <p className="text-sm text-clay-500">No time slots defined yet.</p>
+            )}
+          </Card>
+
+          {/* Callbacks Card */}
+          <Card variant="elevated" className="animate-fade-up" style={{ animationDelay: "225ms" }}>
+            <CardHeader>
+              <CardTitle>Callbacks</CardTitle>
+              <Button variant="ghost" size="sm" onClick={openCallback} icon={<PencilSimple className="w-4 h-4" weight="bold" />}>
+                {hasCallbackInfo ? "Edit" : "Schedule"}
+              </Button>
+            </CardHeader>
+            {hasCallbackInfo ? (
+              <div className="flex flex-col gap-2 text-sm">
+                {show.callbackDate && (
+                  <div className="flex items-center gap-2 text-curtain-800">
+                    <Calendar className="w-4 h-4 text-stage-500" weight="duotone" />
+                    {formatDate(show.callbackDate)}
+                    {formatTimeRange(show.callbackStartTime, show.callbackEndTime) && (
+                      <span className="text-clay-500">
+                        · {formatTimeRange(show.callbackStartTime, show.callbackEndTime)}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {!show.callbackDate && formatTimeRange(show.callbackStartTime, show.callbackEndTime) && (
+                  <div className="flex items-center gap-2 text-curtain-800">
+                    <Clock className="w-4 h-4 text-stage-500" weight="duotone" />
+                    {formatTimeRange(show.callbackStartTime, show.callbackEndTime)}
+                  </div>
+                )}
+                {show.callbackLocation && (
+                  <div className="flex items-center gap-2 text-curtain-800">
+                    <MapPin className="w-4 h-4 text-stage-500" weight="duotone" />
+                    {show.callbackLocation}
+                  </div>
+                )}
+                {show.callbackNotes && (
+                  <p className="text-xs text-clay-500 mt-1">{show.callbackNotes}</p>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-clay-500">
+                No callback scheduled yet. Set the date, time, and location actors will need
+                — it shows on their audition page once they&apos;re called back.
+              </p>
             )}
           </Card>
         </div>
@@ -626,6 +918,31 @@ export default function ShowSetupPage() {
             )}
           </Card>
 
+          {/* Share public audition page */}
+          <Card variant="flat" className="animate-fade-up" style={{ animationDelay: "140ms" }}>
+            <SectionHeader>Public Audition Page</SectionHeader>
+            {show.status === "setup" ? (
+              <p className="text-sm text-clay-500">
+                Your show is a private draft. Open auditions to publish a shareable public
+                page actors can sign up from.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <a href={`/auditions/${showId}`} target="_blank" rel="noopener noreferrer">
+                  <Button variant="outline" size="sm" className="w-full justify-center" icon={<ArrowSquareOut className="w-4 h-4 text-stage-500" weight="duotone" />}>
+                    View public page
+                  </Button>
+                </a>
+                <Button variant="ghost" size="sm" className="w-full justify-center" onClick={copyPublicLink} icon={<LinkSimple className="w-4 h-4 text-stage-500" weight="duotone" />}>
+                  Copy link
+                </Button>
+                <p className="text-[11px] text-clay-400 leading-snug">
+                  Share this link on social media so actors can find your auditions.
+                </p>
+              </div>
+            )}
+          </Card>
+
           {/* Quick Actions */}
           <Card variant="flat" className="animate-fade-up" style={{ animationDelay: "150ms" }}>
             <SectionHeader>Quick Actions</SectionHeader>
@@ -648,6 +965,20 @@ export default function ShowSetupPage() {
               {show.status === "casting" && (
                 <Button variant="outline" size="sm" className="w-full justify-center" onClick={() => router.push(`/shows/${showId}/casting`)} icon={<MaskHappy className="w-4 h-4 text-stage-500" weight="duotone" />}>
                   Go to Casting Board
+                </Button>
+              )}
+              {show.status === "cast" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    if (window.confirm("Archive this show? It moves to your archive and stops appearing in active lists. Cast and history are preserved.")) {
+                      statusMutation.mutate("archived");
+                    }
+                  }}
+                >
+                  Archive Show
                 </Button>
               )}
             </div>
@@ -824,20 +1155,20 @@ export default function ShowSetupPage() {
         </div>
       </Modal>
 
-      {/* ── Add Time Slot Modal ── */}
-      <Modal open={addSlotOpen} onClose={() => setAddSlotOpen(false)} title="Add Time Slot">
+      {/* ── Generate Audition Day Modal ── */}
+      <Modal open={addSlotOpen} onClose={() => setAddSlotOpen(false)} title="Schedule an Audition Day">
         <div className="py-4 flex flex-col gap-4">
-          <div>
-            <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">Slot Name *</label>
-            <Input value={slotDraft.name} onChange={(e) => setSlotDraft({ ...slotDraft, name: e.target.value })} placeholder="e.g. Group 3" />
-          </div>
-          {/* Date selection — only shown when there are multiple audition dates */}
+          <p className="text-sm text-clay-500">
+            Set your window and block size — we&apos;ll generate every time block automatically.
+          </p>
+
+          {/* Date selection */}
           {auditionDates.length > 1 ? (
             <div>
               <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">Audition Date *</label>
               <select
-                value={slotDraft.date}
-                onChange={(e) => setSlotDraft({ ...slotDraft, date: e.target.value })}
+                value={auditionDates.includes(genDraft.date) ? genDraft.date : ""}
+                onChange={(e) => setGenDraft({ ...genDraft, date: e.target.value })}
                 className="w-full px-3 py-2 text-sm rounded-xl border border-cream-200 bg-white focus:outline-none focus:ring-2 focus:ring-stage-300 text-curtain-900"
               >
                 <option value="">Select a date</option>
@@ -845,39 +1176,80 @@ export default function ShowSetupPage() {
                   <option key={d} value={d}>{formatDate(d)}</option>
                 ))}
               </select>
+              <details className="text-[11px] text-clay-400 mt-1">
+                <summary className="cursor-pointer">Use another date</summary>
+                <Input type="date" className="mt-2" value={auditionDates.includes(genDraft.date) ? "" : genDraft.date} onChange={(e) => setGenDraft({ ...genDraft, date: e.target.value })} />
+              </details>
             </div>
           ) : auditionDates.length === 1 ? (
-            <div className="text-xs text-clay-500">
-              <span className="font-semibold text-curtain-700">Date:</span> {formatDate(auditionDates[0])}
+            <div>
+              <div className="text-xs text-clay-500 mb-1">
+                <span className="font-semibold text-curtain-700">Date:</span> {formatDate(auditionDates[0])}
+              </div>
+              <details className="text-[11px] text-clay-400">
+                <summary className="cursor-pointer">Use a different date</summary>
+                <Input type="date" className="mt-2" value={genDraft.date} onChange={(e) => setGenDraft({ ...genDraft, date: e.target.value })} />
+              </details>
             </div>
           ) : (
             <div>
               <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">Audition Date *</label>
-              <Input
-                type="date"
-                value={slotDraft.date}
-                onChange={(e) => setSlotDraft({ ...slotDraft, date: e.target.value })}
-              />
-              <p className="text-[11px] text-clay-400 mt-1">Set audition dates in show details to skip this step.</p>
+              <Input type="date" value={genDraft.date} onChange={(e) => setGenDraft({ ...genDraft, date: e.target.value })} />
+              <p className="text-[11px] text-clay-400 mt-1">Tip: set audition dates in show details and they&apos;ll appear here.</p>
             </div>
           )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">Start Time *</label>
-              <Input type="time" value={slotDraft.startTime} onChange={(e) => setSlotDraft({ ...slotDraft, startTime: e.target.value })} />
+              <Input type="time" value={genDraft.startTime} onChange={(e) => setGenDraft({ ...genDraft, startTime: e.target.value })} />
             </div>
             <div>
               <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">End Time *</label>
-              <Input type="time" value={slotDraft.endTime} onChange={(e) => setSlotDraft({ ...slotDraft, endTime: e.target.value })} />
+              <Input type="time" value={genDraft.endTime} onChange={(e) => setGenDraft({ ...genDraft, endTime: e.target.value })} />
             </div>
           </div>
-          <div>
-            <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">Slot Count</label>
-            <Input type="number" min={1} max={50} value={slotDraft.slotCount} onChange={(e) => setSlotDraft({ ...slotDraft, slotCount: parseInt(e.target.value) || 5 })} />
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">Block Length (min)</label>
+              <Input type="number" min={5} max={240} value={genDraft.blockMinutes} onChange={(e) => setGenDraft({ ...genDraft, blockMinutes: parseInt(e.target.value) || 30 })} />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">Actors per Block</label>
+              <Input type="number" min={1} max={50} value={genDraft.capacity} onChange={(e) => setGenDraft({ ...genDraft, capacity: parseInt(e.target.value) || 5 })} />
+            </div>
           </div>
+
+          {/* Live preview of generated blocks */}
+          {previewBlocks.length > 0 ? (
+            <Card variant="sunken" padding="compact">
+              <p className="text-[10px] font-semibold text-clay-400 tracking-wide uppercase mb-2">
+                Preview · {previewBlocks.length} {previewBlocks.length === 1 ? "block" : "blocks"} · {previewBlocks.length * genDraft.capacity} total spots
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {previewBlocks.map((b, i) => (
+                  <span key={i} className="text-xs font-medium text-curtain-800 bg-white rounded-lg px-2 py-1 border border-cream-200">
+                    {labelFromTime(new Date(b.startTime).toTimeString().slice(0, 5))}
+                  </span>
+                ))}
+              </div>
+            </Card>
+          ) : (
+            <p className="text-xs text-clay-400">Set a date, window, and block length to preview the blocks.</p>
+          )}
+
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="ghost" onClick={() => setAddSlotOpen(false)}>Cancel</Button>
-            <Button variant="primary" onClick={submitSlot} loading={addSlotMutation.isPending}>Add Slot</Button>
+            <Button
+              variant="primary"
+              onClick={submitGenerateDay}
+              loading={generateDayMutation.isPending}
+              disabled={previewBlocks.length === 0}
+              icon={<Lightning className="w-4 h-4" weight="bold" />}
+            >
+              Generate {previewBlocks.length > 0 ? `${previewBlocks.length} ${previewBlocks.length === 1 ? "Block" : "Blocks"}` : "Blocks"}
+            </Button>
           </div>
         </div>
       </Modal>
@@ -969,6 +1341,123 @@ export default function ShowSetupPage() {
           </div>
         </div>
       </Modal>
+
+      {/* ── Schedule Callbacks Modal ── */}
+      <Modal open={callbackOpen} onClose={() => setCallbackOpen(false)} title="Schedule Callbacks">
+        <div className="py-4 flex flex-col gap-4">
+          <p className="text-sm text-clay-500">
+            Set when and where callbacks happen. Actors who are called back see these details
+            on their audition page.
+          </p>
+          <div>
+            <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">Callback Date</label>
+            <Input type="date" value={callbackForm.callbackDate} onChange={(e) => setCallbackForm({ ...callbackForm, callbackDate: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">Start Time</label>
+              <Input type="time" value={callbackForm.callbackStartTime} onChange={(e) => setCallbackForm({ ...callbackForm, callbackStartTime: e.target.value })} />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">End Time</label>
+              <Input type="time" value={callbackForm.callbackEndTime} onChange={(e) => setCallbackForm({ ...callbackForm, callbackEndTime: e.target.value })} />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">Location</label>
+            <Input value={callbackForm.callbackLocation} onChange={(e) => setCallbackForm({ ...callbackForm, callbackLocation: e.target.value })} placeholder="The Riverside Playhouse" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">Notes</label>
+            <Textarea value={callbackForm.callbackNotes} onChange={(e) => setCallbackForm({ ...callbackForm, callbackNotes: e.target.value })} rows={3} placeholder="What to prepare, what to bring, etc." />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="ghost" onClick={() => setCallbackOpen(false)}>Cancel</Button>
+            <Button onClick={submitCallback} loading={callbackMutation.isPending}>Save Callbacks</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
+  );
+}
+
+/* ============================================================
+   Poster Card — upload + display the show poster (cloud-only).
+   Stored in the public org-media bucket; sets shows.poster_url.
+   ============================================================ */
+
+function PosterCard({
+  orgId,
+  showId,
+  title,
+  posterUrl,
+}: {
+  orgId: string;
+  showId: string;
+  title: string;
+  posterUrl: string | null;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const mutation = useMutation({
+    mutationFn: (file: File) => uploadShowPoster(orgId, showId, file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["show", showId] });
+      queryClient.invalidateQueries({ queryKey: ["shows"] });
+      toast("success", "Poster updated!");
+    },
+    onError: (err: Error) => toast("error", err.message),
+  });
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      toast("error", "That file is over 10MB \u2014 try a smaller one.");
+      return;
+    }
+    mutation.mutate(file);
+  }
+
+  // Mock mode: storage uploads aren't available.
+  if (!isSupabaseConfigured) return null;
+
+  return (
+    <Card variant="elevated" className="animate-fade-up" style={{ animationDelay: "120ms" }}>
+      <CardHeader>
+        <CardTitle>Poster</CardTitle>
+      </CardHeader>
+      <div className="flex items-center gap-4">
+        {posterUrl ? (
+          <img
+            src={posterUrl}
+            alt={`${title} poster`}
+            className="w-20 h-28 rounded-lg object-cover flex-shrink-0 bg-cream-100"
+          />
+        ) : (
+          <div className="w-20 h-28 rounded-lg bg-cream-100 flex items-center justify-center flex-shrink-0">
+            <ImageIcon className="w-7 h-7 text-stage-500" weight="duotone" />
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-clay-500 mb-2">
+            Shown on the show card, the audition page, and your theatre's season.
+          </p>
+          <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+          <Button
+            size="sm"
+            variant="outline"
+            loading={mutation.isPending}
+            onClick={() => inputRef.current?.click()}
+            icon={<ImageIcon className="w-4 h-4" weight="bold" />}
+          >
+            {posterUrl ? "Replace Poster" : "Upload Poster"}
+          </Button>
+        </div>
+      </div>
+    </Card>
   );
 }

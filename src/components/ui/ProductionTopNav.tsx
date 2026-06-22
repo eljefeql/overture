@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/features/auth/AuthContext";
+import { useOrg } from "@/features/auth/useOrg";
 import { getShows } from "@/lib/api/client";
 import { Avatar } from "./Avatar";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,7 @@ import {
   Plus,
   Check,
   List as ListIcon,
+  Buildings,
 } from "@phosphor-icons/react";
 
 /* ============================================================
@@ -29,7 +31,8 @@ type Props = {
 };
 
 export function ProductionTopNav({ currentShowId, currentShowTitle }: Props) {
-  const { user, activeRole, logout, switchRole } = useAuth();
+  const { user, logout, switchRole } = useAuth();
+  const { org } = useOrg();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -39,10 +42,11 @@ export function ProductionTopNav({ currentShowId, currentShowTitle }: Props) {
   const avatarRef = useRef<HTMLDivElement>(null);
 
   // Get org shows for the switcher
-  const orgId = activeRole.type === "org" ? activeRole.orgId : "org-1";
+  const orgId = org?.id;
   const { data: orgShows } = useQuery({
     queryKey: ["shows", orgId],
-    queryFn: () => getShows({ orgId }),
+    queryFn: () => getShows({ orgId: orgId! }),
+    enabled: !!orgId,
   });
 
   // Close dropdowns on outside click
@@ -163,6 +167,14 @@ export function ProductionTopNav({ currentShowId, currentShowTitle }: Props) {
 
               {avatarOpen && (
                 <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-xl shadow-lg border border-cream-200 py-1 z-50">
+                  <Link
+                    href="/org"
+                    onClick={() => setAvatarOpen(false)}
+                    className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-800 hover:bg-cream-50 transition"
+                  >
+                    <Buildings className="w-4 h-4 text-stage-500" weight="duotone" />
+                    My Theatre
+                  </Link>
                   <button
                     onClick={() => {
                       setAvatarOpen(false);
