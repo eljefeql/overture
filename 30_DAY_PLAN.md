@@ -23,7 +23,12 @@ A theatre we've never met can: find Overture → sign up → set up their theatr
 ## The 30 days
 
 ### Week 1 — Launch foundation (a beta isn't possible without these)
-- **Production deploy:** Vercel project + custom domain; confirm/promote the hosted Supabase to the prod project; env management; verify the email-confirmation flow end-to-end. *(Today the app only runs locally — this is the gate.)*
+- **Environments & safe deploy** *(do this FIRST — protects customers from bad updates):*
+  - **Two Supabase projects**: current `haptjelzekjdjerrditm` (test/seed data) → **staging**; spin up a fresh **production** project, apply migrations 001–007 clean.
+  - **Vercel**: `main` → production (custom domain, prod Supabase env); every branch → **preview URL** (the "dev server", staging Supabase env). Test every change on a preview before it ships.
+  - **Release flow**: branch → preview → verify → merge to `main` → prod auto-deploy. Migrations run on staging → verify → then prod, and stay **additive/backward-compatible** (expand/contract; never drop a column the live app uses) so a deploy can't break the running app.
+  - **Rollback**: Vercel keeps every build (one-click revert to last good) + git revert. Mock-fallback/try-catch reads already cushion a missing table.
+- **Email-confirmation flow** verified end-to-end on prod.
 - **Email live (Resend):** activate the staged pipeline; transactional sends for invites, callback notifications, cast offers, cast-published; a welcome email. Verify deliverability.
 - **Analytics + monitoring:** PostHog (key funnels — actor signup→onboard→audition; theatre signup→create-show→publish; session replay; flags) + Sentry (client + server error capture).
 - **Legal & trust:** Terms, Privacy (explicit minor/guardian data handling), cookie/consent.
