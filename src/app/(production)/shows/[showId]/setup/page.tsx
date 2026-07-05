@@ -63,6 +63,7 @@ import {
   LinkSimple,
   Clock,
   CalendarX,
+  HouseLine,
 } from "@phosphor-icons/react";
 import { SHOW_STATUS_LABELS } from "@/lib/constants";
 import type { ShowStatus, ShowType, RoleType, GenderReq, TeamRole } from "@/types";
@@ -973,6 +974,17 @@ export default function ShowSetupPage() {
               {show.status === "casting" && (
                 <Button variant="outline" size="sm" className="w-full justify-center" onClick={() => router.push(`/shows/${showId}/casting`)} icon={<MaskHappy className="w-4 h-4 text-stage-500" weight="duotone" />}>
                   Go to Casting Board
+                </Button>
+              )}
+              {(show.status === "cast" || show.status === "archived") && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => router.push(`/shows/${showId}/hub`)}
+                  icon={<HouseLine className="w-4 h-4 text-stage-500" weight="duotone" />}
+                >
+                  Open the Show Hub
                 </Button>
               )}
               {show.status === "cast" && (

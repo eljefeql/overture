@@ -238,3 +238,84 @@ export type CastAssignment = {
   status: OfferStatus;
   sortOrder: number;
 };
+
+/* ============================================================
+   Show Hub (Week 3) — rehearsals, announcements, files, norms
+   ============================================================ */
+
+/** Who's called to a rehearsal. */
+export type CalledScope = "everyone" | "group" | "custom";
+/** The named groups a rehearsal call can target when scope = "group". */
+export type CalledGroup = "principals" | "ensemble" | "crew";
+
+export type Rehearsal = {
+  id: ID;
+  showId: ID;
+  /** YYYY-MM-DD */
+  date: string;
+  startTime: string;
+  endTime: string;
+  location: string | null;
+  /** What's being worked, e.g. "Act 1, sc. 3–5". */
+  focus: string | null;
+  notes: string | null;
+  calledScope: CalledScope;
+  calledGroup: CalledGroup | null;
+  /** User ids picked when calledScope = "custom". */
+  calledPeople: ID[];
+};
+
+export type RehearsalAbsence = {
+  id: ID;
+  rehearsalId: ID;
+  showId: ID;
+  userId: ID;
+  userName: string;
+  reason: string | null;
+  reportedAt: string;
+};
+
+/** Announcement targeting — see SHOW_HUB_SPEC.md. */
+export type AnnouncementAudience =
+  | "company"
+  | "cast"
+  | "principals"
+  | "crew"
+  | "rehearsal";
+
+export type Announcement = {
+  id: ID;
+  showId: ID;
+  authorId: ID;
+  authorName: string;
+  bodyMd: string;
+  audience: AnnouncementAudience;
+  /** Set when audience = "rehearsal" ("everyone called to [rehearsal]"). */
+  rehearsalId: ID | null;
+  pinned: boolean;
+  /** "Also email" flag — recorded on post; delivery rides the notification→email pipeline. */
+  emailed: boolean;
+  createdAt: string;
+  /** Whether the current viewer has read it (drives mark-read on view). */
+  isRead: boolean;
+  /** User ids who have read it (team-only receipt view). */
+  readerIds: ID[];
+};
+
+export type ShowFile = {
+  id: ID;
+  showId: ID;
+  storagePath: string;
+  label: string;
+  category: string | null;
+  sizeBytes: number | null;
+  uploadedBy: ID | null;
+  createdAt: string;
+};
+
+/** One row of the "who to contact for what" routing card. */
+export type CommNormItem = {
+  topic: string;
+  contact: string;
+  method: string;
+};

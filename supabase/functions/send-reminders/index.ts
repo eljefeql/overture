@@ -9,11 +9,12 @@
 // What it reminds about today:
 //   1. Audition slots — signups whose audition group starts in ~24h or ~2h.
 //   2. Offer nudges  — cast offers sitting in 'sent' for more than 48h.
+//   3. Rehearsals    — T-24h + morning-of, to CALLED people only (Week 3;
+//                      needs migration 010 — degrades quietly until pasted).
 //
-// ── EXTENSION POINT (Week 3 — rehearsal reminders) ──
-// Add a new scan here following the same shape: query the upcoming rows
-// (rehearsals T-24h + morning-of, called people only), then call
-// sendOnce({ kind: "rehearsal", subjectId, recipientId, window }, notification).
+// ── EXTENSION POINT ──
+// Add new scans following the same shape: query the upcoming rows, then call
+// sendOnce({ kind, subjectId, recipientId, window }, notification).
 // The reminder_log unique constraint makes any new kind idempotent for free.
 //
 // Idempotency: every send is recorded in `reminder_log` (migration 008) with
@@ -32,10 +33,10 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 const TZ = Deno.env.get("REMINDER_TZ") ?? "America/New_York";
 
 type ReminderKey = {
-  kind: "audition_slot" | "offer_nudge";
+  kind: "audition_slot" | "offer_nudge" | "rehearsal";
   subjectId: string;
   recipientId: string;
-  window: "24h" | "2h" | "48h";
+  window: "24h" | "2h" | "48h" | "morning";
 };
 
 type NotificationInsert = {
@@ -220,6 +221,161 @@ async function sendOfferNudges(supabase: SupabaseClient): Promise<number> {
   return sent;
 }
 
+// ── 3. Rehearsal reminders (T-24h + morning-of, CALLED people only) ──
+// Week 3 extension. Resolves each rehearsal's call list the same way the
+// hub does: everyone = accepted cast + team · group = principals/ensemble
+// (by role_type) or crew (team) · custom = rehearsal_call_people rows.
+// Degrades quietly (returns 0) until migration 010 is pasted.
+
+/** Local YYYY-MM-DD in the reminder timezone. */
+function localDay(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+async function sendRehearsalReminders(supabase: SupabaseClient): Promise<number> {
+  const now = Date.now();
+  const HOUR = 60 * 60 * 1000;
+  const bands: {
+    window: "24h" | "morning";
+    from: Date;
+    to: Date;
+    title: string;
+  }[] = [
+    {
+      window: "24h",
+      from: new Date(now + 23 * HOUR),
+      to: new Date(now + 25 * HOUR),
+      title: "Rehearsal tomorrow",
+    },
+    // "Morning of": fires the first cron run on the rehearsal's local day
+    // within 12h of the call (so a 6:30pm call pings around 6:30am).
+    {
+      window: "morning",
+      from: new Date(now + 1 * HOUR),
+      to: new Date(now + 12 * HOUR),
+      title: "Rehearsal today",
+    },
+  ];
+
+  let sent = 0;
+  for (const band of bands) {
+    const { data: rehearsals, error } = await supabase
+      .from("rehearsals")
+      .select(
+        "id, show_id, start_time, end_time, location, focus, " +
+          "rehearsal_calls(called_scope, group_key), " +
+          "rehearsal_call_people(user_id), shows(title)"
+      )
+      .gte("start_time", band.from.toISOString())
+      .lte("start_time", band.to.toISOString());
+
+    if (error) {
+      // Table missing (migration 010 not pasted yet) or transient failure —
+      // never take the other reminder kinds down with it.
+      console.warn(`rehearsals query skipped (${band.window}): ${error.message}`);
+      continue;
+    }
+
+    let upcoming = rehearsals ?? [];
+    if (band.window === "morning") {
+      const today = localDay(new Date());
+      upcoming = upcoming.filter((r) => localDay(new Date(r.start_time)) === today);
+    }
+    if (upcoming.length === 0) continue;
+
+    const showIds = [...new Set(upcoming.map((r) => r.show_id))];
+    const [{ data: cast, error: castError }, { data: team, error: teamError }] =
+      await Promise.all([
+        supabase
+          .from("cast_assignments")
+          .select("actor_id, show_id, show_roles(role_type)")
+          .in("show_id", showIds)
+          .eq("status", "accepted"),
+        supabase
+          .from("show_team_members")
+          .select("user_id, show_id")
+          .in("show_id", showIds)
+          .not("user_id", "is", null),
+      ]);
+    if (castError || teamError) {
+      console.error(
+        `rehearsal recipients query failed: ${castError?.message ?? teamError?.message}`
+      );
+      continue;
+    }
+
+    for (const rehearsal of upcoming) {
+      /* deno-lint-ignore no-explicit-any */
+      const call: any = Array.isArray(rehearsal.rehearsal_calls)
+        ? rehearsal.rehearsal_calls[0]
+        : rehearsal.rehearsal_calls;
+      const scope = call?.called_scope ?? "everyone";
+      const groupKey = call?.group_key ?? null;
+
+      const showCast = (cast ?? []).filter((c) => c.show_id === rehearsal.show_id);
+      const showTeam = (team ?? [])
+        .filter((t) => t.show_id === rehearsal.show_id)
+        .map((t) => t.user_id as string);
+
+      let recipients: string[];
+      if (scope === "custom") {
+        recipients = (rehearsal.rehearsal_call_people ?? []).map(
+          (p: { user_id: string }) => p.user_id
+        );
+      } else if (scope === "group") {
+        if (groupKey === "crew") {
+          recipients = showTeam;
+        } else {
+          const wantPrincipals = groupKey === "principals";
+          recipients = showCast
+            .filter((c) => {
+              /* deno-lint-ignore no-explicit-any */
+              const role: any = Array.isArray(c.show_roles) ? c.show_roles[0] : c.show_roles;
+              const isPrincipal = ["lead", "supporting"].includes(role?.role_type ?? "");
+              return wantPrincipals ? isPrincipal : !isPrincipal;
+            })
+            .map((c) => c.actor_id);
+        }
+      } else {
+        recipients = [...showCast.map((c) => c.actor_id), ...showTeam];
+      }
+
+      /* deno-lint-ignore no-explicit-any */
+      const show: any = Array.isArray(rehearsal.shows) ? rehearsal.shows[0] : rehearsal.shows;
+      const when = formatWhen(rehearsal.start_time);
+      const focusBit = rehearsal.focus ? ` — ${rehearsal.focus}` : "";
+      const locationBit = rehearsal.location ? ` at ${rehearsal.location}` : "";
+
+      for (const recipientId of [...new Set(recipients)]) {
+        const ok = await sendOnce(
+          supabase,
+          {
+            kind: "rehearsal",
+            subjectId: rehearsal.id,
+            recipientId,
+            window: band.window,
+          },
+          {
+            user_id: recipientId,
+            type: "system",
+            title: band.title,
+            body: `You're called ${when}${locationBit} for ${show?.title ?? "your show"}${focusBit}.`,
+            show_title: show?.title ?? null,
+            link_url: `/shows/${rehearsal.show_id}/hub`,
+          }
+        );
+        if (ok) sent++;
+      }
+    }
+  }
+  return sent;
+}
+
 Deno.serve(async (_req) => {
   // Service role: reads across all shows/signups and inserts notifications
   // directly (bypasses RLS). This key exists ONLY inside Edge Functions.
@@ -231,11 +387,13 @@ Deno.serve(async (_req) => {
   try {
     const auditionReminders = await sendAuditionSlotReminders(supabase);
     const offerNudges = await sendOfferNudges(supabase);
-    // Week 3: rehearsal reminders slot in here (see extension point above).
+    const rehearsalReminders = await sendRehearsalReminders(supabase);
 
-    console.log(`send-reminders: ${auditionReminders} audition reminders, ${offerNudges} offer nudges`);
+    console.log(
+      `send-reminders: ${auditionReminders} audition reminders, ${offerNudges} offer nudges, ${rehearsalReminders} rehearsal reminders`
+    );
     return new Response(
-      JSON.stringify({ auditionReminders, offerNudges }),
+      JSON.stringify({ auditionReminders, offerNudges, rehearsalReminders }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   } catch (e) {

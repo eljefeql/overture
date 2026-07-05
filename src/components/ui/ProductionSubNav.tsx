@@ -37,6 +37,7 @@ const TAB_PHASE: Record<string, number> = {
   callbacks: 2,
   casting: 3,
   "cast-list": 4,
+  hub: 4, // the hub comes alive once the cast is published
 };
 
 export function ProductionSubNav({ showId, showStatus = "setup" }: Props) {
@@ -50,6 +51,7 @@ export function ProductionSubNav({ showId, showStatus = "setup" }: Props) {
     { href: `/shows/${showId}/callbacks`, label: "Callbacks", segment: "callbacks" },
     { href: `/shows/${showId}/casting`, label: "Casting", segment: "casting" },
     { href: `/shows/${showId}/cast-list`, label: "Cast List", segment: "cast-list" },
+    { href: `/shows/${showId}/hub`, label: "Hub", segment: "hub" },
   ];
 
   const isActive = (segment: string) => {

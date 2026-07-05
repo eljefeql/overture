@@ -37,6 +37,7 @@ import {
   Phone,
   NoteBlank,
   Trophy,
+  House,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { formatDate, formatTime } from "@/lib/utils";
@@ -658,6 +659,16 @@ function ShowJourneyCard({
                   Rehearsals begin {formatDate(show.rehearsalStart)}
                 </p>
               )}
+              {/* You're in the company — the hub is your home base now */}
+              <Link href={`/shows/${journey.showId}/hub`} className="inline-block mt-3">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  icon={<House className="w-4 h-4 text-stage-500" weight="duotone" />}
+                >
+                  Show Hub
+                </Button>
+              </Link>
             </div>
           </TimelineStep>
         )}

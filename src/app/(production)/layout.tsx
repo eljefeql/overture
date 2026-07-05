@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { getShow, getShowAccess } from "@/lib/api/client";
+import { getHubAccess } from "@/lib/api/hub";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useOrg } from "@/features/auth/useOrg";
@@ -50,8 +51,11 @@ export default function ProductionLayout({
   }, [activeRole, switchRole, pathname]);
 
   // Extract showId from URL: /shows/[showId]/...
-  const showIdMatch = pathname?.match(/\/shows\/([^/]+)\/(setup|auditions|callbacks|casting|cast-list|conflicts)/);
+  const showIdMatch = pathname?.match(/\/shows\/([^/]+)\/(setup|auditions|callbacks|casting|cast-list|conflicts|hub)/);
   const showId = showIdMatch?.[1] ?? null;
+  // The hub is open to the whole production (accepted cast included),
+  // not just the team — it uses the broader production-member check.
+  const isHubRoute = showIdMatch?.[2] === "hub";
 
   // Fetch show data for nav context (only when inside a show)
   const { data: show } = useQuery({
@@ -60,10 +64,14 @@ export default function ProductionLayout({
     enabled: !!showId,
   });
 
-  // Cloud-mode access check: show team member OR org admin of the show's org
+  // Cloud-mode access check: show team member OR org admin of the show's org.
+  // Hub pages use the broader production-member check (accepted cast can enter).
   const { data: hasShowAccess, isLoading: accessLoading } = useQuery({
-    queryKey: ["showAccess", showId, user?.id],
-    queryFn: () => getShowAccess(showId!, user!.id),
+    queryKey: ["showAccess", showId, user?.id, isHubRoute],
+    queryFn: () =>
+      isHubRoute
+        ? getHubAccess(showId!, user!.id)
+        : getShowAccess(showId!, user!.id),
     enabled: isSupabaseConfigured && !!showId && !!user,
   });
 
@@ -78,7 +86,11 @@ export default function ProductionLayout({
           <EmptyState
             icon={<LockSimple className="w-12 h-12" weight="duotone" />}
             title="You don't have access to this show"
-            description="Only the production team and theatre admins can work on a show. Ask the director or theatre owner to add you to the team."
+            description={
+              isHubRoute
+                ? "The Show Hub is private to the production — its cast, team, and theatre admins. If you've been cast, accept your offer first; otherwise ask the director to add you."
+                : "Only the production team and theatre admins can work on a show. Ask the director or theatre owner to add you to the team."
+            }
             action={
               <Link href="/shows">
                 <Button size="sm">Back to Shows</Button>
