@@ -27,6 +27,8 @@ import type {
   TeamRole,
   User,
   SignupStatus,
+  CallbackStatus,
+  OfferStatus,
   ConflictRange,
   ShowConflictEntry,
   Venue,
@@ -3291,4 +3293,207 @@ export async function unpublishCastList(showId: string): Promise<void> {
       updatedAt: new Date().toISOString(),
     };
   }
+}
+
+// ============================================================
+// ORG DASHBOARD — /shows command center aggregation
+// ============================================================
+
+/** Per-show rollup powering the /shows command center. */
+export type ShowDashboardStats = {
+  showId: string;
+  /** Non-withdrawn audition signups. */
+  signupCount: number;
+  /** Total audition slot capacity across all blocks. */
+  slotsTotal: number;
+  /** Days from today until auditionStart; null when unset or already past. */
+  daysUntilAuditions: number | null;
+  callbacksTotal: number;
+  /** Callbacks created but not yet notified — "ready to send". */
+  callbacksPending: number;
+  callbacksAccepted: number;
+  offersDraft: number;
+  /** Offers sent and still awaiting the actor's response. */
+  offersSent: number;
+  offersAccepted: number;
+  offersDeclined: number;
+  hasRoles: boolean;
+  hasSchedule: boolean;
+};
+
+/** One non-draft cast offer for the offer-tracker table. */
+export type DashboardOffer = {
+  id: string;
+  showId: string;
+  showTitle: string;
+  actorName: string;
+  roleName: string;
+  status: OfferStatus;
+  respondedAt: string | null;
+};
+
+export type OrgDashboard = {
+  /** One entry per ACTIVE show (setup → casting; cast/archived excluded). */
+  stats: ShowDashboardStats[];
+  /** Sent/accepted/declined offers across active shows, tracker-ready. */
+  offers: DashboardOffer[];
+};
+
+/** Days from today (local midnight) until a date string; null if past/unset. */
+function daysUntil(dateStr: string | null): number | null {
+  if (!dateStr) return null;
+  const target = new Date(dateStr.length === 10 ? `${dateStr}T00:00:00` : dateStr);
+  if (isNaN(target.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  target.setHours(0, 0, 0, 0);
+  const diff = Math.round((target.getTime() - today.getTime()) / 86400000);
+  return diff >= 0 ? diff : null;
+}
+
+type ShowAggInput = {
+  hasRoles: boolean;
+  hasSchedule: boolean;
+  slotsTotal: number;
+  signupCount: number;
+  callbackStatuses: CallbackStatus[];
+  offerStatuses: OfferStatus[];
+};
+
+function buildShowStats(show: Show, input: ShowAggInput): ShowDashboardStats {
+  const cb: Record<CallbackStatus, number> = {
+    pending: 0, notified: 0, accepted: 0, declined: 0, no_response: 0,
+  };
+  for (const s of input.callbackStatuses) cb[s]++;
+  const offer: Record<OfferStatus, number> = {
+    draft: 0, sent: 0, accepted: 0, declined: 0, withdrawn: 0,
+  };
+  for (const s of input.offerStatuses) offer[s]++;
+  return {
+    showId: show.id,
+    signupCount: input.signupCount,
+    slotsTotal: input.slotsTotal,
+    daysUntilAuditions: daysUntil(show.auditionStart),
+    callbacksTotal: input.callbackStatuses.length,
+    callbacksPending: cb.pending,
+    callbacksAccepted: cb.accepted,
+    offersDraft: offer.draft,
+    offersSent: offer.sent,
+    offersAccepted: offer.accepted,
+    offersDeclined: offer.declined,
+    hasRoles: input.hasRoles,
+    hasSchedule: input.hasSchedule,
+  };
+}
+
+/**
+ * ONE dual-mode aggregation for the /shows command center: per-show stats +
+ * the offer tracker across the org's ACTIVE shows. Cloud mode runs 5 batched
+ * `.in("show_id", …)` queries (not per-show N+1); any failure degrades to an
+ * empty dashboard — the LOCKED shows grid never depends on this call.
+ */
+export async function getOrgDashboard(orgId: string): Promise<OrgDashboard> {
+  const orgShows = await getShows({ orgId });
+  const active = orgShows.filter(
+    (s) => s.status !== "cast" && s.status !== "archived"
+  );
+  if (active.length === 0) return { stats: [], offers: [] };
+  const ids = active.map((s) => s.id);
+  const titleById = new Map(active.map((s) => [s.id, s.title]));
+
+  if (isSupabaseConfigured) {
+    try {
+      const supabase = getSupabase();
+      const [rolesRes, groupsRes, signupsRes, callbacksRes, offersRes] =
+        await Promise.all([
+          supabase.from("show_roles").select("id, show_id").in("show_id", ids),
+          supabase.from("audition_groups").select("id, show_id, slot_count").in("show_id", ids),
+          supabase.from("audition_signups").select("id, show_id, status")
+            .in("show_id", ids).neq("status", "withdrawn"),
+          supabase.from("callbacks").select("id, show_id, status").in("show_id", ids),
+          supabase.from("cast_assignments")
+            .select("id, show_id, status, updated_at, show_roles:role_id(name), profiles:actor_id(display_name)")
+            .in("show_id", ids),
+        ]);
+      const firstError =
+        rolesRes.error ?? groupsRes.error ?? signupsRes.error ??
+        callbacksRes.error ?? offersRes.error;
+      if (firstError) throw new Error(firstError.message);
+
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      const stats = active.map((show) =>
+        buildShowStats(show, {
+          hasRoles: (rolesRes.data ?? []).some((r: any) => r.show_id === show.id),
+          hasSchedule: (groupsRes.data ?? []).some((g: any) => g.show_id === show.id),
+          slotsTotal: (groupsRes.data ?? [])
+            .filter((g: any) => g.show_id === show.id)
+            .reduce((n: number, g: any) => n + (g.slot_count ?? 0), 0),
+          signupCount: (signupsRes.data ?? []).filter((s: any) => s.show_id === show.id).length,
+          callbackStatuses: (callbacksRes.data ?? [])
+            .filter((c: any) => c.show_id === show.id)
+            .map((c: any) => c.status as CallbackStatus),
+          offerStatuses: (offersRes.data ?? [])
+            .filter((a: any) => a.show_id === show.id)
+            .map((a: any) => a.status as OfferStatus),
+        })
+      );
+      const offers: DashboardOffer[] = (offersRes.data ?? [])
+        .filter((a: any) => a.status !== "draft" && a.status !== "withdrawn")
+        .map((a: any) => ({
+          id: a.id,
+          showId: a.show_id,
+          showTitle: titleById.get(a.show_id) ?? "",
+          actorName: a.profiles?.display_name ?? "",
+          roleName: a.show_roles?.name ?? "",
+          status: a.status as OfferStatus,
+          respondedAt:
+            a.status === "accepted" || a.status === "declined"
+              ? a.updated_at ?? null
+              : null,
+        }));
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+      return { stats, offers };
+    } catch (e) {
+      // The dashboard is additive — degrade to empty, never crash /shows.
+      console.warn("Org dashboard aggregation unavailable:", e);
+      return { stats: [], offers: [] };
+    }
+  }
+
+  await delay();
+  const stats = active.map((show) => {
+    const groups = auditionGroups.filter((g) => g.showId === show.id);
+    const signups = auditionSignups.filter(
+      (s) => s.showId === show.id && s.status !== "withdrawn"
+    );
+    return buildShowStats(show, {
+      hasRoles: (allShowRoles[show.id] ?? []).length > 0,
+      hasSchedule: groups.length > 0,
+      slotsTotal: groups.reduce((n, g) => n + g.slotCount, 0),
+      signupCount: signups.length,
+      callbackStatuses: callbacks
+        .filter((c) => c.showId === show.id)
+        .map((c) => c.status),
+      offerStatuses: castAssignments
+        .filter((a) => a.showId === show.id)
+        .map((a) => a.status),
+    });
+  });
+  const offers: DashboardOffer[] = castAssignments
+    .filter(
+      (a) =>
+        titleById.has(a.showId) &&
+        a.status !== "draft" &&
+        a.status !== "withdrawn"
+    )
+    .map((a) => ({
+      id: a.id,
+      showId: a.showId,
+      showTitle: titleById.get(a.showId)!,
+      actorName: a.actorName,
+      roleName: a.roleName,
+      status: a.status,
+      respondedAt: null, // mock offers don't track response timestamps
+    }));
+  return { stats, offers };
 }

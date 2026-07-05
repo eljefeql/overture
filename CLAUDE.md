@@ -76,6 +76,7 @@ A feature being LOCKED does not freeze *bugs*: fixing a clearly-broken behavior 
 | Show poster upload + display | **LOCKED** | |
 | Preview & "Copy link" to public audition page from setup | **LOCKED** | |
 | Conflict Calendar (`/shows/[showId]/conflicts` — buckets, day heat map, problem dates, people list, email/CSV/print) | **OPEN** | Built 2026-07-05, pending user verify. Needs migration 009 (`signup_conflicts`) pasted for cloud data. |
+| Shows command center (`/shows`: "Needs your attention" panel, per-card status strips, collapsible offer tracker, upcoming-dates timeline; `getOrgDashboard(orgId)` aggregation) | **OPEN** | Built 2026-07-05, pending user verify. Additive AROUND the LOCKED shows grid — grid/cards/filters/links unchanged and never wait on the aggregation query. |
 | Theatre hub `/org` — details (founded/mission/socials/ticketing), logo, Spaces, Key People, Photos, code of conduct, members + invites, collaborators | **LOCKED** | |
 | Public theatre page — reputation surface ("should I work here?") | **LOCKED** | Empty sections omitted for visitors. |
 | Spaces with type grouping (Main Stage / Rehearsal / Other) | **LOCKED** | |
@@ -382,7 +383,7 @@ See [[overture-access-gating]] memory for the full public-vs-gated model. The `(
 ### Production routes (`(production)/`)
 | Route                              | Purpose                | Status |
 |------------------------------------|------------------------|--------|
-| `/shows`                           | Shows list             | Built  |
+| `/shows`                           | Shows list + command center — attention panel (offers awaiting > callbacks to send > auditions filling > setup incomplete), status strip on active show cards, offer tracker, "Coming up" timeline (next 5 dates) | Built  |
 | `/shows/new`                       | Create a show — ONE instant screen (title/type/season/rough audition dates; city/state + locations pre-filled from `useOrg`, editable). Creates in `setup` (private draft) → redirects to the show home. *(Replaced the old 4-step wizard, Sprint D.)* | Built |
 | `/shows/[showId]/setup`            | Show home — **checklist-forward** (Sprint D): a "Get this show ready" progress card leads (Show created · Add roles · Build team [optional] · Schedule auditions · Open auditions), each step done/todo with a CTA; the detailed edit sections (details/roles/schedule/team) remain below. A show sits happily in `setup` (private) until you open auditions. Audition scheduling uses **day-based generation** (pick a day + window + block length + capacity → one Generate makes all the `audition_groups`; live preview; blocks individually deletable) — no more per-block datetime entry. | Built  |
 | `/shows/[showId]/auditions`        | Audition schedule      | Built  |
