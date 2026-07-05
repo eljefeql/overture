@@ -10,6 +10,7 @@ import {
 } from "react";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
 import { claimPendingInvites } from "@/lib/api/client";
+import { identify, resetAnalytics } from "@/lib/analytics";
 import type { User, TeamRole, OrgRole, Pronouns } from "@/types";
 
 type AuthRole =
@@ -130,6 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (sessionUser && !cancelled) {
           const profile = await fetchProfileUser(sessionUser.id);
           if (!cancelled) setUser(profile);
+          if (profile) identify(profile.id, { email: profile.email });
           // Pick up any org invites sent to this email while signed out.
           claimPendingInvites();
         }
@@ -170,7 +172,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const profile = data.user ? await fetchProfileUser(data.user.id) : null;
         // Accept any pending org invites for this email before pages query
         // org membership (best-effort; never blocks sign-in on failure).
-        if (profile) await claimPendingInvites();
+        if (profile) {
+          identify(profile.id, { email: profile.email });
+          await claimPendingInvites();
+        }
         setUser(profile);
         setActiveRole({ type: "actor" });
         return profile;
@@ -217,6 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           // The handle_new_user trigger creates the profiles row; read it back.
           const profile = await fetchProfileUser(data.user.id);
+          if (profile) identify(profile.id, { email: profile.email });
           setUser(profile);
           setActiveRole({ type: "actor" });
           return { user: profile, needsEmailConfirmation: false };
@@ -267,6 +273,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     if (isSupabaseConfigured) {
       getSupabase().auth.signOut().catch(() => {});
+      resetAnalytics();
     }
     setUser(null);
     setActiveRole({ type: "actor" });

@@ -16,6 +16,7 @@ import {
 } from "@/lib/api/client";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useToast } from "@/components/ui/Toast";
+import { track } from "@/lib/analytics";
 import {
   Card,
   Badge,
@@ -97,6 +98,7 @@ export default function CastOfferPage() {
   const acceptMutation = useMutation({
     mutationFn: () => acceptCastOffer(id),
     onSuccess: () => {
+      track("offer_accepted", { assignmentId: id });
       queryClient.invalidateQueries({ queryKey: ["castAssignment", id] });
       queryClient.invalidateQueries({ queryKey: ["actorCastAssignments"] });
       queryClient.invalidateQueries({ queryKey: ["notifications"] });

@@ -33,6 +33,7 @@ import {
   updateOrgPhotoMeta,
 } from "@/lib/api/client";
 import { uploadOrgLogo } from "@/lib/api/photos";
+import { track } from "@/lib/analytics";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
   Card,
@@ -698,6 +699,7 @@ function InviteMemberModal({
   const mutation = useMutation({
     mutationFn: () => inviteOrgMember(orgId, { name, email, role }),
     onSuccess: () => {
+      track("org_invite_sent", { orgId });
       queryClient.invalidateQueries({ queryKey: ["orgMembers", orgId] });
       toast("success", `Invite recorded for ${name.trim()}.`);
       setName("");

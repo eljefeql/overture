@@ -31,7 +31,11 @@ A theatre we've never met can: find Overture → sign up → set up their theatr
 - **Email-confirmation flow** verified end-to-end on prod.
 - **Email live (Resend):** activate the staged pipeline; transactional sends for invites, callback notifications, cast offers, cast-published; a welcome email. Verify deliverability.
 - **Analytics + monitoring:** PostHog (key funnels — actor signup→onboard→audition; theatre signup→create-show→publish; session replay; flags) + Sentry (client + server error capture).
+  - [x] *Built 2026-07-05:* `src/lib/analytics.ts` wrapper + 9 funnel events instrumented + Sentry client/server init — all **dormant until keys are set** (`NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_SENTRY_DSN`). Session replay/flags configure in the PostHog dashboard once the key exists.
 - **Legal & trust:** Terms, Privacy (explicit minor/guardian data handling), cookie/consent.
+  - [x] *Built 2026-07-05:* `/terms` + `/privacy` draft pages (marked "Draft — beta"), linked from signup fine print, landing footer, and auth layout. Cookie/consent banner still todo.
+- **Reminder engine (pulled forward from Show Hub spec):**
+  - [x] *Built 2026-07-05:* `send-reminders` Edge Function (audition-slot T-24h/T-2h + 48h offer nudges, idempotent via `reminder_log`, migration 008) — **deploy + 15-min cron still pending**, see `supabase/SETUP_REMINDERS.md`. Week-3 rehearsal reminders slot into its extension point.
 
 ### Week 2 — The differentiators (why we're better)
 - **Conflict Calendar:** parse the conflict data we already collect → director view: conflict-count buckets (0 / 1–2 / 3–4 / 5+), "problem dates" (date + who + why), filters (all / shortlisted / cast), actions (email 3+, export, print), "best rehearsal dates" surfacing. *(Schema: structured conflict dates, not just the freetext string.)*

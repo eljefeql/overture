@@ -7,6 +7,7 @@ import { useAuth } from "@/features/auth/AuthContext";
 import { createActorProfile, createOrg } from "@/lib/api/client";
 import { completeActorOnboarding, completeMakerOnboarding } from "@/lib/api/onboarding";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { track } from "@/lib/analytics";
 import {
   Card,
   Button,
@@ -154,6 +155,7 @@ function OnboardingWizard() {
         onboardingStep: "complete",
       });
       switchRole({ type: "actor" });
+      track("onboarding_completed", { path: "actor" });
     },
     onError: () => toast("error", "Something went wrong. Please try again."),
   });
@@ -186,6 +188,7 @@ function OnboardingWizard() {
       // The freshly created org must be visible to useOrg before /shows/new.
       queryClient.invalidateQueries({ queryKey: ["myOrg"] });
       switchRole({ type: "team", showId: "show-1", teamRole });
+      track("onboarding_completed", { path: "maker" });
     },
     onError: () => toast("error", "Something went wrong. Please try again."),
   });

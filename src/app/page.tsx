@@ -97,6 +97,14 @@ export default function LandingPage() {
           <p className="text-sm text-curtain-500">
             &copy; 2026 Overture. Built for community theatre.
           </p>
+          <div className="mt-3 flex items-center justify-center gap-4 text-xs">
+            <Link href="/terms" className="text-curtain-500 hover:text-curtain-300 transition">
+              Terms of Service
+            </Link>
+            <Link href="/privacy" className="text-curtain-500 hover:text-curtain-300 transition">
+              Privacy Policy
+            </Link>
+          </div>
         </div>
       </footer>
     </div>

@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/features/auth/AuthContext";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { Button, useToast } from "@/components/ui";
+import { track } from "@/lib/analytics";
 import { GoogleLogo, CircleNotch, EnvelopeSimple } from "@phosphor-icons/react";
 
 export default function SignupPage() {
@@ -71,6 +72,7 @@ function SignupContent() {
     }
     try {
       const result = await signUp(email.trim(), password);
+      track("signup_completed");
       if (result.needsEmailConfirmation) {
         setAwaitingConfirmation(true);
         return;
@@ -197,7 +199,19 @@ function SignupContent() {
         )}
       </div>
 
-      <p className="text-xs text-curtain-500 mt-8">
+      <p className="text-xs text-curtain-500 mt-6">
+        By creating an account you agree to our{" "}
+        <Link href="/terms" className="text-stage-400 hover:text-stage-300">
+          Terms of Service
+        </Link>{" "}
+        and{" "}
+        <Link href="/privacy" className="text-stage-400 hover:text-stage-300">
+          Privacy Policy
+        </Link>
+        .
+      </p>
+
+      <p className="text-xs text-curtain-500 mt-4">
         Already have an account?{" "}
         <Link
           href={next ? `/login?next=${encodeURIComponent(next)}` : "/login"}

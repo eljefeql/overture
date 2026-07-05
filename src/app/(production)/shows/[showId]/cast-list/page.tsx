@@ -16,6 +16,7 @@ import {
   publishCastList,
   unpublishCastList,
 } from "@/lib/api/client";
+import { track } from "@/lib/analytics";
 import {
   Card,
   Badge,
@@ -122,6 +123,7 @@ export default function CastListPage() {
   const publishMutation = useMutation({
     mutationFn: () => publishCastList(showId),
     onSuccess: () => {
+      track("cast_list_published", { showId });
       queryClient.invalidateQueries({ queryKey: ["castList", showId] });
       queryClient.invalidateQueries({ queryKey: ["show", showId] });
       queryClient.invalidateQueries({ queryKey: ["shows"] });

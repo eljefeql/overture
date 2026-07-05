@@ -19,6 +19,7 @@ import {
 } from "@/lib/api/client";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useToast } from "@/components/ui/Toast";
+import { track } from "@/lib/analytics";
 import {
   Card,
   Badge,
@@ -178,6 +179,7 @@ export default function AuditionDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["actorSignup", id] });
       queryClient.invalidateQueries({ queryKey: ["slotAvailability", id] });
       toast("success", "You're signed up! Break a leg.");
+      track("audition_signup", { showId: id });
       setShowModal(false);
     },
     onError: (err: Error) => {

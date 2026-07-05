@@ -22,6 +22,7 @@ import {
 } from "@/lib/api/client";
 import { uploadShowPoster } from "@/lib/api/photos";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { track } from "@/lib/analytics";
 import {
   Card,
   CardHeader,
@@ -206,7 +207,8 @@ export default function ShowSetupPage() {
   // ── Mutations ──
   const statusMutation = useMutation({
     mutationFn: (newStatus: ShowStatus) => updateShow(showId, { status: newStatus }),
-    onSuccess: () => {
+    onSuccess: (_data, newStatus) => {
+      if (newStatus === "auditions_open") track("auditions_opened", { showId });
       queryClient.invalidateQueries({ queryKey: ["showSetup", showId] });
       queryClient.invalidateQueries({ queryKey: ["show", showId] });
       queryClient.invalidateQueries({ queryKey: ["shows"] });

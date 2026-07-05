@@ -14,6 +14,7 @@ import {
   publishCastList,
   sendOffers,
 } from "@/lib/api/client";
+import { track } from "@/lib/analytics";
 import {
   getActor,
   getTeamNotes,
@@ -192,6 +193,7 @@ export default function CastingBoardPage() {
   const sendOffersMutation = useMutation({
     mutationFn: () => sendOffers(showId),
     onSuccess: (count) => {
+      track("offers_sent", { showId, count });
       queryClient.invalidateQueries({ queryKey: ["casting", showId] });
       queryClient.invalidateQueries({ queryKey: ["show", showId] });
       queryClient.invalidateQueries({ queryKey: ["shows"] });

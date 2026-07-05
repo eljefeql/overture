@@ -8,6 +8,7 @@ import { useOrg } from "@/features/auth/useOrg";
 import { createShow, getVenues } from "@/lib/api/client";
 import { Card, Button, Input } from "@/components/ui";
 import { useToast } from "@/components/ui/Toast";
+import { track } from "@/lib/analytics";
 import { ArrowRight, MaskHappy } from "@phosphor-icons/react";
 import type { ShowType } from "@/types";
 
@@ -97,6 +98,7 @@ export default function NewShowPage() {
       });
     },
     onSuccess: (newShow) => {
+      track("show_created", { showId: newShow.id });
       queryClient.invalidateQueries({ queryKey: ["shows"] });
       toast("success", "Show created! Let's build it out.");
       router.push(`/shows/${newShow.id}/setup`);
