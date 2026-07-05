@@ -35,7 +35,9 @@ import type {
   OrgLeader,
   OrgPhoto,
   OrgPastProduction,
+  NotificationPrefs,
 } from "@/types";
+import { DEFAULT_NOTIFICATION_PREFS } from "@/types";
 
 // Simulate network delay
 const delay = (ms = 200) => new Promise((r) => setTimeout(r, ms));
@@ -3507,4 +3509,89 @@ export async function getOrgDashboard(orgId: string): Promise<OrgDashboard> {
       respondedAt: null, // mock offers don't track response timestamps
     }));
   return { stats, offers };
+}
+
+// ============================================================
+// ACCOUNT SETTINGS (Week 4) — notification prefs + deletion
+// ============================================================
+
+// Mock-mode prefs live in memory so the settings toggles feel real in the
+// demo (they reset on refresh — cloud mode persists to profiles).
+let mockNotificationPrefs: NotificationPrefs = { ...DEFAULT_NOTIFICATION_PREFS };
+
+export async function getNotificationPrefs(
+  userId: string
+): Promise<NotificationPrefs> {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await getSupabase()
+        .from("profiles")
+        .select("notification_prefs")
+        .eq("id", userId)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+      const stored = ((data as any)?.notification_prefs ?? {}) as Partial<NotificationPrefs>;
+      return { ...DEFAULT_NOTIFICATION_PREFS, ...stored };
+    } catch (e) {
+      // Column not migrated yet (migration 012) — defaults, never crash.
+      console.warn("Notification prefs unavailable (migration 012 pending?):", e);
+      return { ...DEFAULT_NOTIFICATION_PREFS };
+    }
+  }
+  await delay();
+  return { ...mockNotificationPrefs };
+}
+
+export async function updateNotificationPrefs(
+  userId: string,
+  prefs: NotificationPrefs
+): Promise<void> {
+  if (isSupabaseConfigured) {
+    const { error } = await getSupabase()
+      .from("profiles")
+      .update({ notification_prefs: prefs })
+      .eq("id", userId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  await delay();
+  mockNotificationPrefs = { ...prefs };
+}
+
+/**
+ * Permanently delete the signed-in user's account via the SECURITY DEFINER
+ * delete_my_account() RPC (migration 012). Deletes the auth.users row,
+ * which cascades through profiles and everything referencing it.
+ * Cloud-only — the settings page guards mock mode with a toast.
+ */
+export async function deleteMyAccount(): Promise<void> {
+  if (!isSupabaseConfigured) {
+    throw new Error("Account deletion is available with a cloud account.");
+  }
+  const { error } = await getSupabase().rpc("delete_my_account");
+  if (error) throw new Error(error.message);
+}
+
+// ============================================================
+// RESOURCE LEADS — /resources email capture (migration 012)
+// ============================================================
+
+export async function submitResourceLead(input: {
+  name: string;
+  email: string;
+  /** Honeypot — hidden field; bots fill it, people don't. */
+  website?: string;
+}): Promise<void> {
+  if (isSupabaseConfigured) {
+    const { error } = await getSupabase().rpc("submit_resource_lead", {
+      p_name: input.name,
+      p_email: input.email,
+      p_website: input.website ?? "",
+    });
+    if (error) throw new Error(error.message);
+    return;
+  }
+  // Mock mode: succeed without storing (demo-friendly).
+  await delay(300);
 }

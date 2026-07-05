@@ -75,6 +75,14 @@ function formatWhen(iso: string): string {
 /**
  * Record the reminder in reminder_log, and ONLY if that row is new,
  * insert the notification. Returns true when a notification was sent.
+ *
+ * Notification prefs (migration 012): the in-app notification is ALWAYS
+ * created — that's the product contract. Every row is tagged
+ * category='reminders' so send-notification-email (the single email egress
+ * for account holders) can check profiles.notification_prefs and skip the
+ * email when the recipient turned "Reminders" off. Guests (volunteer email
+ * queue below) have no account and therefore no prefs. Pre-012 the category
+ * column doesn't exist yet — we retry the insert without it.
  */
 async function sendOnce(
   supabase: SupabaseClient,
@@ -101,7 +109,15 @@ async function sendOnce(
   // Empty result → the log row already existed → reminder already sent.
   if (!logged || logged.length === 0) return false;
 
-  const { error: notifError } = await supabase.from("notifications").insert(notification);
+  // Tag as 'reminders' so the email pipeline can honor notification_prefs.
+  let { error: notifError } = await supabase
+    .from("notifications")
+    .insert({ ...notification, category: "reminders" });
+  if (notifError && /category/i.test(notifError.message)) {
+    // Migration 012 not pasted yet — insert without the tag (email pipeline
+    // then treats the row as uncategorized and always sends).
+    ({ error: notifError } = await supabase.from("notifications").insert(notification));
+  }
   if (notifError) {
     console.error(`notification insert failed (${key.kind}/${key.subjectId}): ${notifError.message}`);
     return false;

@@ -139,6 +139,12 @@ export function Nav() {
               {!user && (
                 <>
                   <Link
+                    href="/resources"
+                    className="hidden sm:block px-3 py-1.5 text-sm font-medium rounded-lg text-curtain-300 hover:text-white hover:bg-curtain-800 transition"
+                  >
+                    Resources
+                  </Link>
+                  <Link
                     href="/login"
                     className="px-3 py-1.5 text-sm font-medium rounded-lg text-curtain-300 hover:text-white hover:bg-curtain-800 transition"
                   >
@@ -211,6 +217,14 @@ export function Nav() {
                           {org.name}
                         </Link>
                       )}
+                      <Link
+                        href="/settings"
+                        className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-800 hover:bg-cream-50 transition"
+                        onClick={() => setAvatarOpen(false)}
+                      >
+                        <GearSix className="w-4 h-4 text-stage-500" weight="duotone" />
+                        Settings
+                      </Link>
                       <hr className="border-cream-100 my-1" />
                       <button
                         onClick={handleSignOut}
@@ -309,6 +323,13 @@ export function Nav() {
                       {org.name}
                     </Link>
                   )}
+                  <Link
+                    href="/settings"
+                    className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-curtain-300 hover:text-white hover:bg-curtain-800 transition"
+                  >
+                    <GearSix className="w-5 h-5" weight="duotone" />
+                    Settings
+                  </Link>
                   <button
                     onClick={handleSignOut}
                     className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-curtain-400 hover:text-white hover:bg-curtain-800 transition"

@@ -9,11 +9,14 @@ import {
   getCallbacks,
   getCastAssignments,
   getAuditionSignups,
+  getShowConflicts,
   createCastAssignment,
   updateCastAssignment,
   publishCastList,
   sendOffers,
 } from "@/lib/api/client";
+import { conflictDaysByActor, vocalMismatch, ageMismatch } from "@/lib/castingFit";
+import { CompareActorsModal } from "@/components/casting/CompareActorsModal";
 import { track } from "@/lib/analytics";
 import {
   getActor,
@@ -51,6 +54,7 @@ import {
   PaperPlaneTilt,
   Eye,
   CalendarX,
+  Info,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import type { ShowRole, Callback, CastAssignment, AssignmentType } from "@/types";
@@ -91,6 +95,11 @@ export default function CastingBoardPage() {
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<CastAssignment | null>(null);
 
+  // ── Week 4 additive upgrades: conflict-aware pool + compare ──
+  const [poolFilter, setPoolFilter] = useState<"all" | "none" | "few">("all");
+  const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
+
   // ── Data fetching ──
   const { data, isLoading, isError } = useQuery({
     queryKey: ["casting", showId],
@@ -104,6 +113,23 @@ export default function CastingBoardPage() {
       ]);
       return { show, roles, callbacks: cbs, assignments, signups };
     },
+  });
+
+  // Structured conflicts (Conflict Calendar read model) — powers the
+  // conflict-aware pool chips + per-candidate day counts. Additive: the
+  // board never waits on this; it degrades to "no data" quietly.
+  const { data: conflictEntries } = useQuery({
+    queryKey: ["showConflicts", showId],
+    queryFn: () => getShowConflicts(showId),
+  });
+  const conflictDayMap = conflictDaysByActor(conflictEntries);
+
+  // Profile of the actor currently picked in the assign modal — powers the
+  // soft vocal/age fit warnings (heads-up only, never blocking).
+  const { data: assignCandidateActor } = useQuery({
+    queryKey: ["actor", selectedActorId],
+    queryFn: () => getActor(selectedActorId!),
+    enabled: !!selectedActorId && assignModalOpen,
   });
 
   // Panel actor data
@@ -163,6 +189,10 @@ export default function CastingBoardPage() {
       setAssignModalOpen(false);
       setSelectedActorId(null);
       setAssignRoleId(null);
+      // Week 4 additions: clear compare/filter state too
+      setCompareOpen(false);
+      setCompareIds([]);
+      setPoolFilter("all");
     },
     onError: (err: Error) => toast("error", err.message),
   });
@@ -310,6 +340,83 @@ export default function CastingBoardPage() {
 
   const callbackCandidates = assignRoleId ? getCallbackCandidates(assignRoleId) : [];
   const allAuditionedCandidates = assignRoleId ? getAllAuditionedCandidates(assignRoleId) : [];
+
+  // ── Week 4 additive upgrades (conflict chips, compare, soft warnings) ──
+
+  const assignRole = roles?.find((r) => r.id === assignRoleId) ?? null;
+
+  // Conflict-aware pool filter — "all" (default) shows everyone, exactly as before.
+  const matchesPoolFilter = (actorId: string) => {
+    if (poolFilter === "all") return true;
+    const days = conflictDayMap.get(actorId) ?? 0;
+    return poolFilter === "none" ? days === 0 : days <= 2;
+  };
+  const visibleCallbackCandidates = callbackCandidates.filter((c) =>
+    matchesPoolFilter(c.actorId)
+  );
+  const visibleAuditionedCandidates = allAuditionedCandidates.filter((s) =>
+    matchesPoolFilter(s.actorId)
+  );
+  const filterHidEveryone =
+    poolFilter !== "all" &&
+    visibleCallbackCandidates.length === 0 &&
+    visibleAuditionedCandidates.length === 0 &&
+    (callbackCandidates.length > 0 || allAuditionedCandidates.length > 0);
+
+  const toggleCompare = (actorId: string) => {
+    setCompareIds((prev) =>
+      prev.includes(actorId)
+        ? prev.filter((id) => id !== actorId)
+        : prev.length >= 3
+          ? prev // cap at 3
+          : [...prev, actorId]
+    );
+  };
+
+  // Soft fit warnings for the actor picked in the assign modal.
+  const candidateProfile =
+    selectedActorId && assignCandidateActor?.id === selectedActorId
+      ? assignCandidateActor.profile
+      : null;
+  const vocalWarning =
+    !!assignRole && !!candidateProfile
+      ? vocalMismatch(assignRole.vocalRange, candidateProfile.vocalRange)
+      : false;
+  const ageWarning =
+    !!assignRole && !!candidateProfile
+      ? ageMismatch(
+          assignRole.ageRange,
+          candidateProfile.ageRangeLow,
+          candidateProfile.ageRangeHigh
+        )
+      : false;
+
+  // "Cast this actor" from the compare modal — the existing assign flow,
+  // just with the actor pre-picked.
+  const castFromCompare = (actorId: string) => {
+    if (!assignRoleId || !assignRole) return;
+    const cb = cbs.find((c) => c.actorId === actorId && c.roleId === assignRoleId);
+    const signup = signups.find((s) => s.actorId === actorId);
+    const actorName = cb?.actorName ?? signup?.actorName;
+    if (!actorName) return;
+    setSelectedActorId(actorId);
+    assignMutation.mutate({
+      roleId: assignRoleId,
+      roleName: assignRole.name,
+      actorId,
+      actorName,
+      assignmentType: assignType,
+    });
+  };
+
+  const closeAssignModal = () => {
+    setAssignModalOpen(false);
+    setAssignRoleId(null);
+    setSelectedActorId(null);
+    setCompareIds([]);
+    setCompareOpen(false);
+    setPoolFilter("all");
+  };
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
@@ -481,24 +588,33 @@ export default function CastingBoardPage() {
       {/* ── Actor Selection Modal ── */}
       <Modal
         open={assignModalOpen}
-        onClose={() => {
-          setAssignModalOpen(false);
-          setAssignRoleId(null);
-          setSelectedActorId(null);
-        }}
+        onClose={closeAssignModal}
         title={`Select ${assignType} — ${roles?.find((r) => r.id === assignRoleId)?.name ?? "Role"}`}
       >
         <div className="py-4">
           {callbackCandidates.length > 0 || allAuditionedCandidates.length > 0 ? (
             <>
+              {/* Conflict-aware pool chips (Week 4 — additive; "All" = original view) */}
+              <div className="flex flex-wrap items-center gap-2 mb-4">
+                <Pill variant="filter" active={poolFilter === "all"} onClick={() => setPoolFilter("all")}>
+                  All candidates
+                </Pill>
+                <Pill variant="filter" active={poolFilter === "none"} onClick={() => setPoolFilter("none")}>
+                  No conflicts
+                </Pill>
+                <Pill variant="filter" active={poolFilter === "few"} onClick={() => setPoolFilter("few")}>
+                  Few conflicts (≤2 days)
+                </Pill>
+              </div>
+
               <div className="flex flex-col gap-2 mb-6 max-h-72 overflow-y-auto">
                 {/* Callback-accepted actors (primary pool) */}
-                {callbackCandidates.length > 0 && (
+                {visibleCallbackCandidates.length > 0 && (
                   <>
                     <h3 className="text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-1">
                       Callback Pool
                     </h3>
-                    {callbackCandidates.map((cb) => (
+                    {visibleCallbackCandidates.map((cb) => (
                       <label
                         key={cb.id}
                         className={`flex items-center gap-3 p-3 rounded-xl border transition cursor-pointer ${
@@ -518,7 +634,23 @@ export default function CastingBoardPage() {
                         <Avatar name={cb.actorName} size="sm" />
                         <div className="flex-1">
                           <span className="text-sm font-semibold text-curtain-900">{cb.actorName}</span>
+                          {(conflictDayMap.get(cb.actorId) ?? 0) > 0 && (
+                            <span className="flex items-center gap-1 text-[11px] text-stage-700">
+                              <CalendarX className="w-3.5 h-3.5 text-stage-600" weight="duotone" />
+                              {conflictDayMap.get(cb.actorId)} conflict day{conflictDayMap.get(cb.actorId) !== 1 ? "s" : ""}
+                            </span>
+                          )}
                         </div>
+                        <input
+                          type="checkbox"
+                          checked={compareIds.includes(cb.actorId)}
+                          onChange={() => toggleCompare(cb.actorId)}
+                          onClick={(e) => e.stopPropagation()}
+                          disabled={!compareIds.includes(cb.actorId) && compareIds.length >= 3}
+                          className="accent-curtain-700 w-4 h-4"
+                          title="Add to compare"
+                          aria-label={`Compare ${cb.actorName}`}
+                        />
                         <button
                           type="button"
                           onClick={(e) => {
@@ -538,12 +670,12 @@ export default function CastingBoardPage() {
                 )}
 
                 {/* All Auditioned actors (broader pool) */}
-                {allAuditionedCandidates.length > 0 && (
+                {visibleAuditionedCandidates.length > 0 && (
                   <>
                     <h3 className="text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-1 mt-3">
                       All Auditioned
                     </h3>
-                    {allAuditionedCandidates.map((signup) => (
+                    {visibleAuditionedCandidates.map((signup) => (
                       <label
                         key={signup.id}
                         className={`flex items-center gap-3 p-3 rounded-xl border transition cursor-pointer ${
@@ -563,7 +695,23 @@ export default function CastingBoardPage() {
                         <Avatar name={signup.actorName} size="sm" />
                         <div className="flex-1">
                           <span className="text-sm font-semibold text-curtain-900">{signup.actorName}</span>
+                          {(conflictDayMap.get(signup.actorId) ?? 0) > 0 && (
+                            <span className="flex items-center gap-1 text-[11px] text-stage-700">
+                              <CalendarX className="w-3.5 h-3.5 text-stage-600" weight="duotone" />
+                              {conflictDayMap.get(signup.actorId)} conflict day{conflictDayMap.get(signup.actorId) !== 1 ? "s" : ""}
+                            </span>
+                          )}
                         </div>
+                        <input
+                          type="checkbox"
+                          checked={compareIds.includes(signup.actorId)}
+                          onChange={() => toggleCompare(signup.actorId)}
+                          onClick={(e) => e.stopPropagation()}
+                          disabled={!compareIds.includes(signup.actorId) && compareIds.length >= 3}
+                          className="accent-curtain-700 w-4 h-4"
+                          title="Add to compare"
+                          aria-label={`Compare ${signup.actorName}`}
+                        />
                         <button
                           type="button"
                           onClick={(e) => {
@@ -581,18 +729,61 @@ export default function CastingBoardPage() {
                     ))}
                   </>
                 )}
+                {/* Filter hid everyone — friendly note, not an empty screen */}
+                {filterHidEveryone && (
+                  <p className="text-sm text-clay-500 text-center py-4">
+                    Nobody matches that conflict filter — try &ldquo;All candidates.&rdquo;
+                  </p>
+                )}
               </div>
-              <div className="flex justify-end gap-3">
-                <Button variant="ghost" onClick={() => setAssignModalOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  onClick={submitAssignment}
-                  loading={assignMutation.isPending}
-                  disabled={!selectedActorId}
-                >
-                  Assign Actor
-                </Button>
+
+              {/* Soft fit warnings (Week 4) — heads up, never blocking */}
+              {(vocalWarning || ageWarning) && assignRole && candidateProfile && (
+                <div className="flex items-start gap-2 p-3 bg-stage-50 border border-stage-200 rounded-xl mb-4">
+                  <Info className="w-4 h-4 text-stage-600 mt-0.5 flex-shrink-0" weight="duotone" />
+                  <div className="text-xs text-stage-700 leading-relaxed">
+                    {vocalWarning && (
+                      <p>
+                        Heads up: {assignRole.name} calls for{" "}
+                        <strong>{assignRole.vocalRange}</strong>, and this actor lists{" "}
+                        <strong>{candidateProfile.vocalRange}</strong> — not a dealbreaker,
+                        just worth a listen.
+                      </p>
+                    )}
+                    {ageWarning && (
+                      <p>
+                        Heads up: {assignRole.name} plays <strong>{assignRole.ageRange}</strong>,
+                        and this actor lists{" "}
+                        <strong>
+                          {candidateProfile.ageRangeLow ?? "?"}–{candidateProfile.ageRangeHigh ?? "?"}
+                        </strong>{" "}
+                        — not a dealbreaker, just flagging it.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  {compareIds.length >= 2 && (
+                    <Button variant="outline" onClick={() => setCompareOpen(true)}>
+                      Compare ({compareIds.length})
+                    </Button>
+                  )}
+                </div>
+                <div className="flex justify-end gap-3">
+                  <Button variant="ghost" onClick={closeAssignModal}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={submitAssignment}
+                    loading={assignMutation.isPending}
+                    disabled={!selectedActorId}
+                  >
+                    Assign Actor
+                  </Button>
+                </div>
               </div>
             </>
           ) : (
@@ -600,13 +791,26 @@ export default function CastingBoardPage() {
               <p className="text-sm text-clay-500 mb-4">
                 No available candidates. Actors must have auditioned for this show.
               </p>
-              <Button variant="ghost" onClick={() => setAssignModalOpen(false)}>
+              <Button variant="ghost" onClick={closeAssignModal}>
                 Close
               </Button>
             </div>
           )}
         </div>
       </Modal>
+
+      {/* ── Compare Actors (Week 4 additive) ── */}
+      <CompareActorsModal
+        open={compareOpen}
+        onClose={() => setCompareOpen(false)}
+        actorIds={compareIds}
+        role={assignRole}
+        roles={roles ?? []}
+        signups={signups}
+        conflictDays={conflictDayMap}
+        onCast={castFromCompare}
+        castPending={assignMutation.isPending}
+      />
 
       {/* ── Remove Assignment Confirmation ── */}
       <Modal open={removeConfirmOpen} onClose={() => setRemoveConfirmOpen(false)} title="Remove Assignment">

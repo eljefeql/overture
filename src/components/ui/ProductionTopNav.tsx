@@ -11,6 +11,7 @@ import { Avatar } from "./Avatar";
 import { cn } from "@/lib/utils";
 import {
   CaretDown,
+  GearSix,
   SignOut,
   UserCircle,
   Plus,
@@ -186,6 +187,14 @@ export function ProductionTopNav({ currentShowId, currentShowTitle }: Props) {
                     <UserCircle className="w-4 h-4 text-stage-500" weight="duotone" />
                     Switch to Actor
                   </button>
+                  <Link
+                    href="/settings"
+                    onClick={() => setAvatarOpen(false)}
+                    className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-800 hover:bg-cream-50 transition"
+                  >
+                    <GearSix className="w-4 h-4 text-stage-500" weight="duotone" />
+                    Settings
+                  </Link>
                   <hr className="border-cream-100 my-1" />
                   <button
                     onClick={() => {

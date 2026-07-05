@@ -73,6 +73,25 @@ export type ActorProfile = {
   awards: Award[];
 } & Timestamps;
 
+/**
+ * Per-category EMAIL toggles (profiles.notification_prefs jsonb, migration
+ * 012). In-app notifications are always created; these only gate email.
+ */
+export type NotificationPrefs = {
+  /** Audition, rehearsal & volunteer-shift reminder emails. */
+  reminders: boolean;
+  /** Show announcement emails from production teams. */
+  announcements: boolean;
+  /** Cast offer & callback emails. */
+  offers: boolean;
+};
+
+export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
+  reminders: true,
+  announcements: true,
+  offers: true,
+};
+
 export type User = {
   id: ID;
   email: string;

@@ -237,7 +237,7 @@ body {
 @media print {
   /* Hide nav, badges, buttons */
   nav, header,
-  .print\\:hidden,
+  .print\:hidden,
   [class*="ProductionTopNav"],
   [class*="ProductionSubNav"],
   [class*="bg-curtain-900"],

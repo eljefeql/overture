@@ -27,7 +27,32 @@ type NotificationRecord = {
   link_url: string | null;
   is_read: boolean;
   created_at: string;
+  /** Email-gating hint (migration 012): 'reminders' | 'announcements' | 'offers' | null. */
+  category?: string | null;
 };
+
+// ── Notification preferences (migration 012) ──
+// profiles.notification_prefs is a jsonb of per-category EMAIL toggles:
+// { reminders, announcements, offers } — all default true. In-app
+// notifications are always created upstream; this function is the single
+// email egress for account holders, so the pref check lives here.
+// Writers tag rows via notifications.category (send-reminders → 'reminders',
+// announce_to_show → 'announcements', create_notification → 'offers' for
+// callback/cast types). Untagged rows fall back to a type-based guess;
+// truly uncategorized rows are always emailed (safe default).
+
+function categoryOf(n: NotificationRecord): string | null {
+  if (n.category) return n.category;
+  if (n.type === "callback" || n.type === "cast") return "offers";
+  return null;
+}
+
+/* deno-lint-ignore no-explicit-any */
+function emailAllowed(prefs: any, category: string | null): boolean {
+  if (!category) return true;
+  if (!prefs || typeof prefs !== "object") return true; // pre-012 / missing → default on
+  return prefs[category] !== false;
+}
 
 type WebhookPayload = {
   type: "INSERT" | "UPDATE" | "DELETE";
@@ -92,10 +117,11 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ status: "skipped" }), { status: 200 });
   }
 
-  // Recipient email
+  // Recipient email + notification prefs (select * so this keeps working
+  // whether or not migration 012's notification_prefs column exists yet).
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("email, display_name")
+    .select("*")
     .eq("id", notification.user_id)
     .maybeSingle();
 
@@ -104,6 +130,19 @@ Deno.serve(async (req) => {
     console.error(`Cannot email notification ${notification.id}: ${reason}`);
     await logDelivery("failed", reason);
     return new Response(JSON.stringify({ status: "failed", error: reason }), { status: 200 });
+  }
+
+  // Respect the recipient's per-category email toggles. The in-app
+  // notification already exists — we're only skipping the email.
+  const category = categoryOf(notification);
+  if (!emailAllowed(profile.notification_prefs, category)) {
+    console.log(
+      `Notification ${notification.id} skipped — recipient turned off '${category}' emails`
+    );
+    await logDelivery("skipped", `Recipient preference: ${category} emails off`);
+    return new Response(JSON.stringify({ status: "skipped", reason: "preference" }), {
+      status: 200,
+    });
   }
 
   // Send via Resend

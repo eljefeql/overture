@@ -398,6 +398,14 @@ export default function LandingPage() {
                 </li>
                 <li>
                   <Link
+                    href="/resources"
+                    className="text-sm text-curtain-300 hover:text-white transition"
+                  >
+                    Free templates &amp; resources
+                  </Link>
+                </li>
+                <li>
+                  <Link
                     href="/login"
                     className="text-sm text-curtain-300 hover:text-white transition"
                   >
