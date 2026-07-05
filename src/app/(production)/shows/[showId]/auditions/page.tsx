@@ -8,6 +8,7 @@ import {
   getShowRoles,
   getAuditionGroups,
   getAuditionSignups,
+  getShowConflicts,
   getTeamNotes,
   getActor,
   getCallbacks,
@@ -44,6 +45,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { formatTime, formatHeight, formatDate } from "@/lib/utils";
 import {
   MagnifyingGlass,
+  CalendarX,
   CheckCircle,
   ClipboardText,
   Star,
@@ -54,6 +56,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { SIGNUP_STATUS_LABELS, SIGNUP_STATUS_BADGE } from "@/lib/constants";
+import Link from "next/link";
 import type { AuditionSignup, SignupStatus, ShowStatus } from "@/types";
 
 /* ============================================================
@@ -133,6 +136,14 @@ export default function AuditionsPage() {
   const { data: actorNotes } = useQuery({
     queryKey: ["teamNotes", showId, selectedActorId],
     queryFn: () => getTeamNotes(showId, selectedActorId!),
+    enabled: !!selectedActorId,
+  });
+
+  // Structured conflict ranges (migration 009) — enriches the panel's
+  // conflicts display; degrades to empty pre-migration.
+  const { data: showConflicts } = useQuery({
+    queryKey: ["showConflicts", showId],
+    queryFn: () => getShowConflicts(showId),
     enabled: !!selectedActorId,
   });
 
@@ -381,6 +392,14 @@ export default function AuditionsPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Link href={`/shows/${showId}/conflicts`}>
+            <Button
+              variant="outline"
+              icon={<CalendarX className="w-4 h-4 text-stage-500" weight="duotone" />}
+            >
+              Conflict Calendar
+            </Button>
+          </Link>
           {show.status === "auditions_open" && (
             <Button
               variant="primary"
@@ -776,6 +795,24 @@ export default function AuditionsPage() {
                         <span className="text-curtain-800">{panelSignup.conflicts}</span>
                       </div>
                     )}
+                    {(() => {
+                      const ranges =
+                        showConflicts?.find((c) => c.signupId === panelSignup.id)
+                          ?.ranges ?? [];
+                      if (ranges.length === 0) return null;
+                      return (
+                        <div className="flex justify-between items-start">
+                          <span className="text-clay-500">Conflict Dates</span>
+                          <div className="flex gap-1 flex-wrap justify-end">
+                            {ranges.map((r, i) => (
+                              <Pill key={i} variant="status">
+                                {formatConflictRange(r.startDate, r.endDate)}
+                              </Pill>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </Card>
               </div>
@@ -959,4 +996,20 @@ export default function AuditionsPage() {
       </Modal>
     </div>
   );
+}
+
+/* ── Conflict range label ("Jun 12–14" / "Jun 28 – Jul 2") ── */
+function formatConflictRange(start: string, end: string): string {
+  const fmt = (d: string) =>
+    new Date(d + "T12:00:00").toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+  if (start === end) return fmt(start);
+  const s = new Date(start + "T12:00:00");
+  const e = new Date(end + "T12:00:00");
+  if (s.getMonth() === e.getMonth() && s.getFullYear() === e.getFullYear()) {
+    return `${fmt(start)}\u2013${e.getDate()}`;
+  }
+  return `${fmt(start)} \u2013 ${fmt(end)}`;
 }

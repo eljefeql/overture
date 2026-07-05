@@ -50,7 +50,7 @@ export default function ProductionLayout({
   }, [activeRole, switchRole, pathname]);
 
   // Extract showId from URL: /shows/[showId]/...
-  const showIdMatch = pathname?.match(/\/shows\/([^/]+)\/(setup|auditions|callbacks|casting|cast-list)/);
+  const showIdMatch = pathname?.match(/\/shows\/([^/]+)\/(setup|auditions|callbacks|casting|cast-list|conflicts)/);
   const showId = showIdMatch?.[1] ?? null;
 
   // Fetch show data for nav context (only when inside a show)

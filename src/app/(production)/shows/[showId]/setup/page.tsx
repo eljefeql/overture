@@ -62,6 +62,7 @@ import {
   ArrowSquareOut,
   LinkSimple,
   Clock,
+  CalendarX,
 } from "@phosphor-icons/react";
 import { SHOW_STATUS_LABELS } from "@/lib/constants";
 import type { ShowStatus, ShowType, RoleType, GenderReq, TeamRole } from "@/types";
@@ -957,6 +958,11 @@ export default function ShowSetupPage() {
               {(show.status === "auditions_open" || show.status === "auditions_closed") && (
                 <Button variant="outline" size="sm" className="w-full justify-center" onClick={() => router.push(`/shows/${showId}/auditions`)} icon={<Users className="w-4 h-4 text-stage-500" weight="duotone" />}>
                   View Audition Schedule
+                </Button>
+              )}
+              {show.status !== "setup" && (
+                <Button variant="outline" size="sm" className="w-full justify-center" onClick={() => router.push(`/shows/${showId}/conflicts`)} icon={<CalendarX className="w-4 h-4 text-stage-500" weight="duotone" />}>
+                  Conflict Calendar
                 </Button>
               )}
               {show.status === "callbacks" && (

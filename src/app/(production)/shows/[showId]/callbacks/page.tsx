@@ -43,7 +43,9 @@ import {
   Calendar,
   UserCirclePlus,
   Users,
+  CalendarX,
 } from "@phosphor-icons/react";
+import Link from "next/link";
 import { CALLBACK_STATUS_LABELS, CALLBACK_STATUS_BADGE } from "@/lib/constants";
 import type { Callback, AuditionSignup, ShowRole } from "@/types";
 
@@ -244,6 +246,14 @@ export default function CallbacksPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Link href={`/shows/${showId}/conflicts`}>
+            <Button
+              variant="outline"
+              icon={<CalendarX className="w-4 h-4 text-stage-500" weight="duotone" />}
+            >
+              Conflict Calendar
+            </Button>
+          </Link>
           {pendingCount > 0 && (
             <Button
               variant="secondary"

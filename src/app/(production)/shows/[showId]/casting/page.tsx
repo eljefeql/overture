@@ -50,7 +50,9 @@ import {
   UserCirclePlus,
   PaperPlaneTilt,
   Eye,
+  CalendarX,
 } from "@phosphor-icons/react";
+import Link from "next/link";
 import type { ShowRole, Callback, CastAssignment, AssignmentType } from "@/types";
 
 /* ============================================================
@@ -328,6 +330,14 @@ export default function CastingBoardPage() {
             </p>
           )}
           <div className="flex gap-2">
+            <Link href={`/shows/${showId}/conflicts`}>
+              <Button
+                variant="outline"
+                icon={<CalendarX className="w-4 h-4 text-stage-500" weight="duotone" />}
+              >
+                Conflict Calendar
+              </Button>
+            </Link>
             {draftAssignments.length > 0 && (
               <Button
                 variant="primary"

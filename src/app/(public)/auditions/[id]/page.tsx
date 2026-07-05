@@ -169,6 +169,10 @@ export default function AuditionDetailPage() {
               : `${c.startDate} to ${c.endDate}`
           )
           .join(", "),
+        conflictDates: data.conflicts.map((c) => ({
+          startDate: c.startDate,
+          endDate: c.endDate,
+        })),
         isMember: data.isMember,
         mailingList: data.mailingList,
         referralSource: data.referralSource,

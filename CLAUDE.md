@@ -75,6 +75,7 @@ A feature being LOCKED does not freeze *bugs*: fixing a clearly-broken behavior 
 | Cast list (publish, share, print, unpublish) | **LOCKED** | |
 | Show poster upload + display | **LOCKED** | |
 | Preview & "Copy link" to public audition page from setup | **LOCKED** | |
+| Conflict Calendar (`/shows/[showId]/conflicts` — buckets, day heat map, problem dates, people list, email/CSV/print) | **OPEN** | Built 2026-07-05, pending user verify. Needs migration 009 (`signup_conflicts`) pasted for cloud data. |
 | Theatre hub `/org` — details (founded/mission/socials/ticketing), logo, Spaces, Key People, Photos, code of conduct, members + invites, collaborators | **LOCKED** | |
 | Public theatre page — reputation surface ("should I work here?") | **LOCKED** | Empty sections omitted for visitors. |
 | Spaces with type grouping (Main Stage / Rehearsal / Other) | **LOCKED** | |
@@ -348,6 +349,7 @@ The actor profile (`/profile`) is a single scrolling page, NOT tabbed. Editing h
 - **Org identity:** `useOrg()` (`src/features/auth/useOrg.ts`) — the signed-in user's theatre `{ org, role, isLoading }`. NEVER hardcode `org-1`; every production page derives orgId/orgName from this hook (mock mode resolves to org-1 automatically). `claimPendingInvites()` runs at sign-in, session restore, and onboarding finish.
 - **Production gating:** the `(production)` layout blocks cloud users who aren't on the show's team or owner/admin of its org (friendly empty states; `getShowAccess`). Audition evaluation actions (status changes, shortlist, batch ops) are hidden unless the user `canEvaluate` (org owner/admin always can).
 - **Analytics & monitoring (dormant-safe):** `src/lib/analytics.ts` — lazy PostHog wrapper (`track`/`identify`/`resetAnalytics`); every call is a silent no-op unless `NEXT_PUBLIC_POSTHOG_KEY` is set (host override: `NEXT_PUBLIC_POSTHOG_HOST`). `AnalyticsProvider` (in the `Providers` chain) captures SPA pageviews. `identify` fires in AuthContext on sign-in/session-restore (cloud mode only, never mock personas); funnel events (`signup_completed`, `onboarding_completed`, `audition_signup`, `show_created`, `auditions_opened`, `offers_sent`, `offer_accepted`, `org_invite_sent`, `cast_list_published`) are one-liners at existing mutation success points. Sentry: `src/instrumentation.ts` + `src/instrumentation-client.ts` + root `sentry.server/edge.config.ts`, all gated on `NEXT_PUBLIC_SENTRY_DSN` — zero effect (and zero bundle download) when unset. Reminder cron: `supabase/functions/send-reminders` + `reminder_log` (migration 008, service-role only) — see `supabase/SETUP_REMINDERS.md`.
+- **Conflict Calendar data:** actors' signup conflict ranges are stored structured in `signup_conflicts` (migration 009, in `PASTE_ME_NEXT.sql`) alongside the legacy freetext `audition_signups.conflicts` string (untouched). `signUpForAudition` now takes `conflictDates` and writes both (best-effort on the structured rows; revive-after-withdraw replaces them); `getShowConflicts(showId)` is the dual-mode read (cloud try/catch → `[]` pre-paste; mock derives from `conflictDates` on mock signups).
 - **Mock data:** `src/data/shows.ts` and `src/data/actors.ts`
 - **State management:** TanStack Query for server state, Zustand for UI state
 - **Queries:** Use `useQuery` with descriptive `queryKey` arrays
@@ -387,6 +389,7 @@ See [[overture-access-gating]] memory for the full public-vs-gated model. The `(
 | `/shows/[showId]/callbacks`        | Callback management    | Built  |
 | `/shows/[showId]/casting`          | Casting board          | Built  |
 | `/shows/[showId]/cast-list`        | Published cast list    | Built  |
+| `/shows/[showId]/conflicts`        | Conflict Calendar — rehearsal-period availability from structured signup conflicts: 0/1–2/3–4/5+ buckets, per-day heat calendar, problem dates (who's out when), filter tabs (all/shortlisted+/cast), email-3+/CSV/print actions | Built  |
 | `/shows/[showId]/messages`         | Per-show communication | Planned |
 | `/org`                             | Theatre hub — details (incl. founded/mission/FB/IG/ticketing), Performance Spaces, Key People, Photos (cloud-only upload), code of conduct, members + real invites (auto-accepted at invitee's next sign-in), show collaborators. Hub sections DO show empty-state prompts (unlike the public page). | Built  |
 | `/org/dashboard`                   | Billing / subscription | Planned (V2) |

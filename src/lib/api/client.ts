@@ -27,6 +27,8 @@ import type {
   TeamRole,
   User,
   SignupStatus,
+  ConflictRange,
+  ShowConflictEntry,
   Venue,
   OrgLeader,
   OrgPhoto,
@@ -1237,6 +1239,60 @@ export async function getAuditionSignups(
   return auditionSignups.filter((s) => s.showId === showId);
 }
 
+/**
+ * Conflict Calendar read model — every non-withdrawn signup for a show with
+ * its structured conflict ranges (signup_conflicts, migration 009), actor
+ * name/email, and signup status. Cloud reads are try/catch-wrapped → [] until
+ * PASTE_ME_NEXT.sql is pasted.
+ */
+export async function getShowConflicts(
+  showId: string
+): Promise<ShowConflictEntry[]> {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await getSupabase()
+        .from("audition_signups")
+        .select(
+          "id, actor_id, status, profiles:actor_id(display_name, email), signup_conflicts(start_date, end_date)"
+        )
+        .eq("show_id", showId)
+        .neq("status", "withdrawn");
+      if (error) throw new Error(error.message);
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      return (data ?? []).map((r: any) => ({
+        signupId: r.id,
+        actorId: r.actor_id,
+        actorName: r.profiles?.display_name ?? "",
+        actorEmail: r.profiles?.email ?? null,
+        status: r.status,
+        ranges: (r.signup_conflicts ?? [])
+          .map((c: any) => ({ startDate: c.start_date, endDate: c.end_date }))
+          .sort((a: ConflictRange, b: ConflictRange) =>
+            a.startDate.localeCompare(b.startDate)
+          ),
+      }));
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+    } catch (e) {
+      // signup_conflicts not migrated yet — degrade to empty, never crash.
+      console.warn("Show conflicts unavailable (migration 009 pending?):", e);
+      return [];
+    }
+  }
+  await delay();
+  return auditionSignups
+    .filter((s) => s.showId === showId && s.status !== "withdrawn")
+    .map((s) => ({
+      signupId: s.id,
+      actorId: s.actorId,
+      actorName: s.actorName,
+      actorEmail: actors.find((a) => a.id === s.actorId)?.email ?? null,
+      status: s.status,
+      ranges: (s.conflictDates ?? [])
+        .slice()
+        .sort((a, b) => a.startDate.localeCompare(b.startDate)),
+    }));
+}
+
 export type DiscoverFilters = {
   radius: number | null; // null = anywhere
   showType: "all" | "musical" | "play" | "revue";
@@ -1596,6 +1652,8 @@ export async function signUpForAudition(signup: {
   openToOther: boolean;
   willCrew: boolean;
   conflicts: string;
+  /** Structured conflict ranges — persisted to signup_conflicts (migration 009). */
+  conflictDates: ConflictRange[];
   // Acknowledgment fields (stored since migration 003 — fixes data loss)
   isMember: boolean | null;
   mailingList: boolean;
@@ -1661,6 +1719,31 @@ export async function signUpForAudition(signup: {
       : supabase.from("audition_signups").insert(row);
     const { data, error } = await query.select(SIGNUP_SELECT).single();
     if (error) throw new Error(error.message);
+
+    // Structured conflict ranges → signup_conflicts (migration 009).
+    // Best-effort: the signup itself must never fail because the conflicts
+    // table isn't migrated yet — the freetext column still has the data.
+    try {
+      if (existing) {
+        // Revive after withdraw: replace stale ranges with the fresh ones.
+        const { error: delError } = await supabase
+          .from("signup_conflicts").delete().eq("signup_id", data.id);
+        if (delError) console.warn("Old signup conflicts not cleared:", delError.message);
+      }
+      if (signup.conflictDates.length > 0) {
+        const { error: confError } = await supabase.from("signup_conflicts").insert(
+          signup.conflictDates.map((c) => ({
+            signup_id: data.id,
+            start_date: c.startDate,
+            end_date: c.endDate,
+          }))
+        );
+        if (confError) console.warn("Structured conflicts not saved:", confError.message);
+      }
+    } catch (e) {
+      console.warn("Structured conflicts not saved:", e);
+    }
+
     return rowToSignup(data);
   }
 
@@ -1706,6 +1789,7 @@ export async function signUpForAudition(signup: {
     openToOther: signup.openToOther,
     willCrew: signup.willCrew,
     conflicts: signup.conflicts,
+    conflictDates: signup.conflictDates,
     status: "signed_up",
     signedUpAt: new Date().toISOString(),
   };

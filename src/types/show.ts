@@ -180,8 +180,26 @@ export type AuditionSignup = {
   openToOther: boolean;
   willCrew: boolean;
   conflicts: string | null;
+  /** Structured conflict ranges (mock-mode storage; cloud rows live in signup_conflicts). */
+  conflictDates?: ConflictRange[];
   status: SignupStatus;
   signedUpAt: string;
+};
+
+/** A single unavailable date range (YYYY-MM-DD, inclusive). */
+export type ConflictRange = {
+  startDate: string;
+  endDate: string;
+};
+
+/** One person's structured conflicts for a show — Conflict Calendar read model. */
+export type ShowConflictEntry = {
+  signupId: ID;
+  actorId: ID;
+  actorName: string;
+  actorEmail: string | null;
+  status: SignupStatus;
+  ranges: ConflictRange[];
 };
 
 export type TeamNote = {

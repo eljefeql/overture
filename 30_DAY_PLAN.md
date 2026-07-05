@@ -39,6 +39,7 @@ A theatre we've never met can: find Overture → sign up → set up their theatr
 
 ### Week 2 — The differentiators (why we're better)
 - **Conflict Calendar:** parse the conflict data we already collect → director view: conflict-count buckets (0 / 1–2 / 3–4 / 5+), "problem dates" (date + who + why), filters (all / shortlisted / cast), actions (email 3+, export, print), "best rehearsal dates" surfacing. *(Schema: structured conflict dates, not just the freetext string.)*
+  - [x] *Built 2026-07-05:* `/shows/[showId]/conflicts` — buckets, per-day heat calendar over the rehearsal period, problem dates with names, people list, filter tabs, email-3+/CSV/print. Backed by `signup_conflicts` (migration 009 in `PASTE_ME_NEXT.sql` — **staging paste pending**); signup modal now persists structured ranges alongside the freetext string. Zero-conflict days = "schedule away"; low-heat days = the best rehearsal dates.
 - **Production dashboard command center:** attention panel, activity feed, offer tracker, upcoming dates.
 
 ### Week 3 — The rehearsal lifecycle (full Show Home; retention engine)

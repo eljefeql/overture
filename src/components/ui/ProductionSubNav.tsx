@@ -33,6 +33,7 @@ const STATUS_PHASE_ORDER: Record<ShowStatus, number> = {
 const TAB_PHASE: Record<string, number> = {
   setup: 0,
   auditions: 1,
+  conflicts: 1, // conflict data exists as soon as signups do
   callbacks: 2,
   casting: 3,
   "cast-list": 4,
@@ -45,6 +46,7 @@ export function ProductionSubNav({ showId, showStatus = "setup" }: Props) {
   const tabs = [
     { href: `/shows/${showId}/setup`, label: "Setup", segment: "setup" },
     { href: `/shows/${showId}/auditions`, label: "Auditions", segment: "auditions" },
+    { href: `/shows/${showId}/conflicts`, label: "Conflicts", segment: "conflicts" },
     { href: `/shows/${showId}/callbacks`, label: "Callbacks", segment: "callbacks" },
     { href: `/shows/${showId}/casting`, label: "Casting", segment: "casting" },
     { href: `/shows/${showId}/cast-list`, label: "Cast List", segment: "cast-list" },
