@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { DM_Serif_Display, Inter } from "next/font/google";
 import { Providers } from "@/components/Providers";
+import { SITE_URL } from "@/lib/seo";
 import "./globals.css";
 
 const dmSerifDisplay = DM_Serif_Display({
@@ -17,12 +18,21 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: {
-    default: "Overture — Community Theatre Casting",
-    template: "%s | Overture",
+    default: "Overture — Casting & Production for Community Theatre",
+    template: "%s · Overture",
   },
   description:
-    "The casting and talent platform for community theatre. Find auditions, manage casting, build your theatre career.",
+    "Overture is where community theatres post auditions, actors find their next role, and whole productions run in one place — from signup sheet to closing night.",
+  openGraph: {
+    siteName: "Overture",
+    type: "website",
+    images: ["/og.png"],
+  },
+  twitter: {
+    card: "summary_large_image",
+  },
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,

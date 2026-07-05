@@ -21,6 +21,7 @@ function SignupContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next");
+  const pathHint = searchParams.get("path"); // landing CTA role hint: actor | maker
   const { beginOnboarding, loginWithGoogle, signUp, isLoading } = useAuth();
   const { toast } = useToast();
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -32,8 +33,12 @@ function SignupContent() {
   const [error, setError] = useState<string | null>(null);
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
 
-  const onboardingUrl = next
-    ? `/onboarding?next=${encodeURIComponent(next)}`
+  const onboardingParams = new URLSearchParams();
+  if (next) onboardingParams.set("next", next);
+  if (pathHint === "actor" || pathHint === "maker")
+    onboardingParams.set("path", pathHint);
+  const onboardingUrl = onboardingParams.size
+    ? `/onboarding?${onboardingParams.toString()}`
     : "/onboarding";
 
   function handleGetStarted() {

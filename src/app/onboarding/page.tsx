@@ -60,7 +60,11 @@ function OnboardingWizard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [path, setPath] = useState<Path>(null);
+  // Landing CTAs can pre-select the fork (/signup?path=actor|maker → here).
+  const pathHint = searchParams.get("path");
+  const [path, setPath] = useState<Path>(
+    pathHint === "actor" || pathHint === "maker" ? pathHint : null
+  );
   const [step, setStep] = useState(0);
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
 

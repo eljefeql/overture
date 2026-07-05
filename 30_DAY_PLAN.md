@@ -51,9 +51,11 @@ A theatre we've never met can: find Overture → sign up → set up their theatr
 
 ### Week 4 — Front door, trust, polish
 - **Landing page redesign** (prototype-caliber; "free during beta" pricing).
+  - [x] *Built 2026-07-05:* `/` rebuilt as a server component with the prototype's structure and our own honest copy — hero with dual role CTAs (`/signup?path=actor|maker`, preselects the onboarding fork) + browse link, 4-step how-it-works, for-actors and for-theatres value props (Conflict Calendar + Show Hub named), "Free during beta" band (replaces fabricated stats), built-with note (replaces testimonials), pricing (actors free forever · theatres free during beta, $29/mo planned, founding-member consideration), "standing ovation" final CTA, organized footer. Verified at desktop + 375px.
 - **Casting board upgrades** (Compare Actors, conflict-aware tabs, soft warnings).
 - **Account settings** (change email, delete account, notification preferences).
 - **SEO/OG meta** on public pages (shows/theatres/browse) — beta discovery + shareable links.
+  - [x] *Built 2026-07-05:* root metadata defaults (`metadataBase`, `%s · Overture` template, OG site name/type + `public/og.png` 1200×630, twitter card); per-route `generateMetadata` wrapper layouts around the untouched client pages (`/auditions/[id]` "Auditions: {show} at {org}", `/theatres/[orgId]`, `/volunteer/[showId]`; static on `/browse`) via lean anon-key REST reads in `src/lib/seo.ts` (generic fallbacks in mock mode / on failure); `app/sitemap.ts` (static routes + open-show/org ids when configured) + `app/robots.ts` (gated app areas disallowed). Set `NEXT_PUBLIC_SITE_URL` on prod deploy.
 - **Lead magnets (lean):** a `/resources` page + 2–3 downloadable templates (audition notice, casting checklist, rehearsal schedule) + email capture.
 - **QA pass:** walk the full loop with fresh real accounts (actor + theatre); fix; copy polish.
 

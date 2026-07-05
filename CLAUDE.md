@@ -92,6 +92,8 @@ A feature being LOCKED does not freeze *bugs*: fixing a clearly-broken behavior 
 | `/browse`, `/auditions/[id]`, `/theatres/[orgId]` anonymous-viewable | **LOCKED** | |
 | Public signup-count teaser + SM-contact gating on audition pages | **LOCKED** | |
 | Rich-text (bold/italic/bullets) for mission + code of conduct; safe Markdown render; photo Lightbox | **LOCKED** | |
+| Landing page redesign (`/` — hero w/ dual role CTAs carrying `?path=actor\|maker` into signup→onboarding fork preselect, 4-step how-it-works, for-actors + for-theatres value props naming Conflict Calendar + Show Hub, "Free during beta" band, built-with note, honest pricing incl. $29/mo-planned + founding-member consideration, "standing ovation" final CTA, 3-column footer) | **OPEN** | Built 2026-07-05, pending user verify. Server component; honest copy only — no fabricated stats/testimonials. The `?path` hint reads are small additive lines in the LOCKED signup + onboarding pages (no behavior change without the param). |
+| SEO/OG meta on public pages (`src/lib/seo.ts` lean anon REST reads → `generateMetadata` layouts for `/auditions/[id]`, `/theatres/[orgId]`, `/volunteer/[showId]`; static meta on `/browse` + landing; root `metadataBase`/OG/twitter defaults; `public/og.png` 1200×630 branded default; `app/sitemap.ts` + `app/robots.ts`) | **OPEN** | Built 2026-07-05, pending user verify. Falls back to generic titles in mock mode / on any fetch failure; client pages untouched (metadata-only wrapper layouts). Set `NEXT_PUBLIC_SITE_URL` in prod (defaults to `https://overturecasting.com`). |
 
 ### Comms
 | Feature | Status | Note |
@@ -110,7 +112,6 @@ A feature being LOCKED does not freeze *bugs*: fixing a clearly-broken behavior 
 | Geocoding / real radius distance (currently `distanceMiles` is null in cloud) | **OPEN** | Sprint D Phase 4; needs Google vs Mapbox decision. |
 | Account settings (change email, delete account, notification prefs) | **OPEN** | |
 | Content advisories on shows + dealbreaker filtering on Discover | **OPEN** | Dealbreakers collected but filter nothing yet. |
-| SEO / OG share meta on public pages | **OPEN** | |
 | Pre-loaded show/character database (Concord + MTI) | **OPEN** | V1.2 research; write our own descriptions. |
 | Billing / `$29/mo` / `/org/dashboard` | **OPEN** | V2. |
 | Per-show messaging (`/shows/[showId]/messages`) | **OPEN** | Planned. |
