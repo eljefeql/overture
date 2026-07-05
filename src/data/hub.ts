@@ -137,3 +137,91 @@ export const commNorms: Record<string, CommNormItem[]> = {
     { topic: "Music questions", contact: "Marcus Webb (MD)", method: "Email marcus.webb@nctmail.org" },
   ],
 };
+
+/* ── Volunteers — dual-path mock data (show-1) ── */
+
+/** Internal mock signup row — carries the cancel token + guest email the
+ *  cloud keeps in volunteer_signups (never exposed on the public board). */
+export type MockVolunteerSignup = {
+  id: string;
+  needId: string;
+  userId: string | null;
+  name: string;
+  guestEmail: string | null;
+  cancelToken: string;
+  status: "confirmed" | "cancelled";
+};
+
+export type MockVolunteerNeed = {
+  id: string;
+  showId: string;
+  label: string;
+  eventDate: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  slots: number;
+  notes: string | null;
+};
+
+export const volunteerNeeds: MockVolunteerNeed[] = [
+  {
+    id: "vol-1",
+    showId: "show-1",
+    label: "Ushers — opening night",
+    eventDate: dayFromNow(12),
+    startTime: timeOn(12, "18:00"),
+    endTime: timeOn(12, "21:30"),
+    slots: 6,
+    notes: "Arrive an hour before curtain. Black top if you have one!",
+  },
+  {
+    id: "vol-2",
+    showId: "show-1",
+    label: "Concessions",
+    eventDate: dayFromNow(12),
+    startTime: timeOn(12, "18:30"),
+    endTime: timeOn(12, "21:00"),
+    slots: 3,
+    notes: null,
+  },
+  {
+    id: "vol-3",
+    showId: "show-1",
+    label: "Set build Saturday",
+    eventDate: dayFromNow(6),
+    startTime: timeOn(6, "09:00"),
+    endTime: timeOn(6, "14:00"),
+    slots: 10,
+    notes: "No experience needed — bring work gloves if you have them.",
+  },
+];
+
+export const volunteerSignups: MockVolunteerSignup[] = [
+  {
+    id: "vs-1",
+    needId: "vol-1",
+    userId: "actor-5",
+    name: "Marcus Bell",
+    guestEmail: null,
+    cancelToken: "mock-token-vs-1",
+    status: "confirmed",
+  },
+  {
+    id: "vs-2",
+    needId: "vol-1",
+    userId: null,
+    name: "Robert Kim",
+    guestEmail: "robert.kim@example.com",
+    cancelToken: "mock-token-vs-2",
+    status: "confirmed",
+  },
+  {
+    id: "vs-3",
+    needId: "vol-3",
+    userId: null,
+    name: "Dana Whitfield",
+    guestEmail: "dana.w@example.com",
+    cancelToken: "mock-token-vs-3",
+    status: "confirmed",
+  },
+];

@@ -448,6 +448,17 @@ export async function getShowAccess(
  */
 export async function claimPendingInvites(): Promise<number> {
   if (!isSupabaseConfigured) return 0;
+
+  // Same email-match moment: attach any guest volunteer signups made with
+  // this email before the account existed (claim_volunteer_signups RPC,
+  // migration 011). Best-effort — never blocks the invite claim.
+  try {
+    const { error } = await getSupabase().rpc("claim_volunteer_signups");
+    if (error) console.warn("Volunteer signup auto-link skipped:", error.message);
+  } catch (e) {
+    console.warn("Volunteer signup auto-link skipped:", e);
+  }
+
   try {
     const { data, error } = await getSupabase().rpc("claim_org_invites");
     if (error) {

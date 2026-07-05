@@ -11,6 +11,14 @@
 //   2. Offer nudges  — cast offers sitting in 'sent' for more than 48h.
 //   3. Rehearsals    — T-24h + morning-of, to CALLED people only (Week 3;
 //                      needs migration 010 — degrades quietly until pasted).
+//   4. Volunteer shifts — T-24h to everyone signed up. Members get a
+//      notifications row (rides the email pipeline); GUESTS (no account —
+//      approved gating exception) get a `guest_emails` queue row instead
+//      (migration 011; a notification can't target someone with no user_id).
+//   5. Guest email queue — sends pending guest_emails rows (confirmations
+//      enqueued by claim_volunteer_slot + the reminders above) via Resend.
+//      Without RESEND_API_KEY the rows stay 'pending' and are delivered
+//      automatically by the first run after the key is set.
 //
 // ── EXTENSION POINT ──
 // Add new scans following the same shape: query the upcoming rows, then call
@@ -33,7 +41,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 const TZ = Deno.env.get("REMINDER_TZ") ?? "America/New_York";
 
 type ReminderKey = {
-  kind: "audition_slot" | "offer_nudge" | "rehearsal";
+  kind: "audition_slot" | "offer_nudge" | "rehearsal" | "volunteer_shift";
   subjectId: string;
   recipientId: string;
   window: "24h" | "2h" | "48h" | "morning";
@@ -376,6 +384,212 @@ async function sendRehearsalReminders(supabase: SupabaseClient): Promise<number>
   return sent;
 }
 
+// ── 4. Volunteer shift reminders (T-24h, members + guests) ──
+// Members get a notifications row (email rides the pipeline). Guests get a
+// guest_emails queue row — its dedupe_key mirrors reminder_log's idempotency
+// (reminder_log can't hold guests: recipient_id references profiles).
+// Degrades quietly (returns 0) until migrations 010/011 are pasted.
+
+async function sendVolunteerReminders(supabase: SupabaseClient): Promise<number> {
+  const now = Date.now();
+  const HOUR = 60 * 60 * 1000;
+  const from = new Date(now + 23 * HOUR);
+  const to = new Date(now + 25 * HOUR);
+  const tomorrow = localDay(new Date(now + 24 * HOUR));
+
+  // Timed shifts in the 24h band + date-only shifts happening tomorrow.
+  const [timed, dateOnly] = await Promise.all([
+    supabase
+      .from("volunteer_needs")
+      .select(
+        "id, show_id, label, event_date, start_time, end_time, shows(title), " +
+          "volunteer_signups(id, user_id, guest_name, guest_email, cancel_token, status)"
+      )
+      .gte("start_time", from.toISOString())
+      .lte("start_time", to.toISOString()),
+    supabase
+      .from("volunteer_needs")
+      .select(
+        "id, show_id, label, event_date, start_time, end_time, shows(title), " +
+          "volunteer_signups(id, user_id, guest_name, guest_email, cancel_token, status)"
+      )
+      .is("start_time", null)
+      .eq("event_date", tomorrow),
+  ]);
+
+  if (timed.error || dateOnly.error) {
+    // Tables missing (migrations 010/011 not pasted) or transient failure.
+    console.warn(
+      `volunteer_needs query skipped: ${timed.error?.message ?? dateOnly.error?.message}`
+    );
+    return 0;
+  }
+
+  let sent = 0;
+  for (const need of [...(timed.data ?? []), ...(dateOnly.data ?? [])]) {
+    /* deno-lint-ignore no-explicit-any */
+    const show: any = Array.isArray(need.shows) ? need.shows[0] : need.shows;
+    const when = need.start_time
+      ? formatWhen(need.start_time)
+      : `tomorrow, ${new Intl.DateTimeFormat("en-US", {
+          timeZone: TZ,
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+        }).format(new Date(`${need.event_date}T12:00:00`))}`;
+    const body = `You're volunteering as ${need.label} for ${show?.title ?? "a show"} ${when}. Thank you — it means the world!`;
+
+    for (const signup of need.volunteer_signups ?? []) {
+      if (signup.status !== "confirmed") continue;
+
+      if (signup.user_id) {
+        // Member path — in-app notification; email rides the pipeline.
+        const ok = await sendOnce(
+          supabase,
+          {
+            kind: "volunteer_shift",
+            subjectId: need.id,
+            recipientId: signup.user_id,
+            window: "24h",
+          },
+          {
+            user_id: signup.user_id,
+            type: "system",
+            title: "Volunteer shift tomorrow",
+            body,
+            show_title: show?.title ?? null,
+            link_url: `/shows/${need.show_id}/hub`,
+          }
+        );
+        if (ok) sent++;
+      } else if (signup.guest_email) {
+        // Guest path — queue an email; dedupe_key keeps it idempotent.
+        const { data: queued, error: queueError } = await supabase
+          .from("guest_emails")
+          .upsert(
+            {
+              to_email: signup.guest_email,
+              to_name: signup.guest_name,
+              subject: `Volunteer shift tomorrow — ${show?.title ?? "your show"}`,
+              body,
+              show_title: show?.title ?? null,
+              cancel_token: signup.cancel_token,
+              dedupe_key: `volunteer_reminder:24h:${signup.id}`,
+            },
+            { onConflict: "dedupe_key", ignoreDuplicates: true }
+          )
+          .select();
+        if (queueError) {
+          console.error(`guest reminder queue failed (${signup.id}): ${queueError.message}`);
+        } else if (queued && queued.length > 0) {
+          sent++;
+        }
+      }
+    }
+  }
+  return sent;
+}
+
+// ── 5. Guest email queue (confirmations + guest reminders via Resend) ──
+// Guests have no account, so their email can't ride the notifications
+// pipeline. Rows are enqueued by claim_volunteer_slot (confirmations) and
+// the volunteer scan above (reminders). No RESEND_API_KEY → rows stay
+// 'pending' and go out on the first run after the key is set.
+
+const APP_URL = Deno.env.get("APP_URL") ?? "http://localhost:3001";
+
+type GuestEmail = {
+  id: string;
+  to_email: string;
+  to_name: string | null;
+  subject: string;
+  body: string;
+  show_title: string | null;
+  cancel_token: string | null;
+};
+
+function guestEmailHtml(e: GuestEmail): string {
+  const cancelUrl = e.cancel_token
+    ? new URL(`/volunteer/cancel/${e.cancel_token}`, APP_URL).toString()
+    : null;
+  const signupUrl = new URL("/signup", APP_URL).toString();
+  return `
+  <div style="font-family: Georgia, serif; max-width: 560px; margin: 0 auto; padding: 24px;">
+    <h1 style="color: #3d2645; font-size: 22px; margin-bottom: 4px;">${e.subject}</h1>
+    ${e.show_title ? `<p style="color: #8a7968; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; margin-top: 0;">${e.show_title}</p>` : ""}
+    <p style="color: #2b2b2b; font-size: 16px; line-height: 1.5;">${e.body}</p>
+    ${cancelUrl ? `<p style="color: #8a7968; font-size: 13px; margin-top: 20px;">Plans changed? No hard feelings — <a href="${cancelUrl}" style="color: #3d2645;">give up your spot</a> so someone else can step in.</p>` : ""}
+    <p style="color: #8a7968; font-size: 12px; margin-top: 28px;">
+      Want to track your signups and hear when the theatre needs help?
+      <a href="${signupUrl}" style="color: #3d2645;">Create a free Overture account</a>.
+    </p>
+  </div>`;
+}
+
+async function processGuestEmails(supabase: SupabaseClient): Promise<number> {
+  const { data: pending, error } = await supabase
+    .from("guest_emails")
+    .select("id, to_email, to_name, subject, body, show_title, cancel_token")
+    .eq("status", "pending")
+    .order("created_at")
+    .limit(50);
+
+  if (error) {
+    // Table missing (migration 011 not pasted) — degrade quietly.
+    console.warn(`guest_emails query skipped: ${error.message}`);
+    return 0;
+  }
+  if (!pending || pending.length === 0) return 0;
+
+  const resendKey = Deno.env.get("RESEND_API_KEY");
+  if (!resendKey) {
+    // Leave rows pending — they send automatically once the key exists.
+    console.log(`RESEND_API_KEY not set — ${pending.length} guest email(s) waiting`);
+    return 0;
+  }
+
+  let sent = 0;
+  for (const email of pending as GuestEmail[]) {
+    try {
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${resendKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: Deno.env.get("RESEND_FROM") ?? "Overture <onboarding@resend.dev>",
+          to: [email.to_email],
+          subject: email.subject,
+          html: guestEmailHtml(email),
+        }),
+      });
+      if (res.ok) {
+        await supabase
+          .from("guest_emails")
+          .update({ status: "sent", sent_at: new Date().toISOString(), error: null })
+          .eq("id", email.id);
+        sent++;
+      } else {
+        const body = await res.text();
+        console.error(`Resend error for guest email ${email.id}: ${res.status} ${body}`);
+        await supabase
+          .from("guest_emails")
+          .update({ status: "failed", error: `Resend ${res.status}: ${body.slice(0, 500)}` })
+          .eq("id", email.id);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error(`Guest email send threw (${email.id}): ${message}`);
+      await supabase
+        .from("guest_emails")
+        .update({ status: "failed", error: message.slice(0, 500) })
+        .eq("id", email.id);
+    }
+  }
+  return sent;
+}
+
 Deno.serve(async (_req) => {
   // Service role: reads across all shows/signups and inserts notifications
   // directly (bypasses RLS). This key exists ONLY inside Edge Functions.
@@ -388,12 +602,20 @@ Deno.serve(async (_req) => {
     const auditionReminders = await sendAuditionSlotReminders(supabase);
     const offerNudges = await sendOfferNudges(supabase);
     const rehearsalReminders = await sendRehearsalReminders(supabase);
+    const volunteerReminders = await sendVolunteerReminders(supabase);
+    const guestEmails = await processGuestEmails(supabase);
 
     console.log(
-      `send-reminders: ${auditionReminders} audition reminders, ${offerNudges} offer nudges, ${rehearsalReminders} rehearsal reminders`
+      `send-reminders: ${auditionReminders} audition reminders, ${offerNudges} offer nudges, ${rehearsalReminders} rehearsal reminders, ${volunteerReminders} volunteer reminders, ${guestEmails} guest emails`
     );
     return new Response(
-      JSON.stringify({ auditionReminders, offerNudges, rehearsalReminders }),
+      JSON.stringify({
+        auditionReminders,
+        offerNudges,
+        rehearsalReminders,
+        volunteerReminders,
+        guestEmails,
+      }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   } catch (e) {

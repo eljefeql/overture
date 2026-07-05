@@ -76,3 +76,16 @@ In the Supabase Dashboard (https://supabase.com/dashboard/project/haptjelzekjdje
 2. Check **Edge Functions → send-notification-email → Logs** in the dashboard.
 3. Check the `notification_deliveries` table — every notification should get
    a row with status `sent`, `failed`, or `skipped` (skipped = key not set).
+
+## Guest volunteer emails (no extra setup)
+
+Community guests who volunteer through the public `/volunteer/[showId]` page
+have **no account**, so their emails can't ride the `notifications` webhook
+above. Instead, their confirmation (queued by `claim_volunteer_slot`,
+migration 011) and their T-24h shift reminder sit in the `guest_emails`
+table, and the **`send-reminders` cron** (see `SETUP_REMINDERS.md`) sends
+them via Resend using the SAME secrets you set here (`RESEND_API_KEY`,
+`RESEND_FROM`, `APP_URL` — `APP_URL` matters: it builds the tokened cancel
+link in each email). Nothing extra to configure — once the key exists and
+`send-reminders` is deployed + scheduled, any waiting guest emails go out on
+the next run.

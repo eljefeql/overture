@@ -21,11 +21,18 @@ import {
   deleteShowFile,
   getShowFileUrl,
   updateCommNorms,
+  getVolunteerNeeds,
+  createVolunteerNeed,
+  updateVolunteerNeed,
+  deleteVolunteerNeed,
+  claimVolunteerSlot,
+  unclaimVolunteerSlot,
   resolveCalledUserIds,
   calledLabel,
   nameForUser,
   type HubData,
   type RehearsalInput,
+  type VolunteerNeedInput,
 } from "@/lib/api/hub";
 import {
   Card,
@@ -73,6 +80,9 @@ import {
   CloudArrowUp,
   Eye,
   MaskHappy,
+  HandHeart,
+  LinkSimple,
+  CheckCircle,
 } from "@phosphor-icons/react";
 import type {
   ID,
@@ -82,6 +92,7 @@ import type {
   CalledGroup,
   ShowFile,
   CommNormItem,
+  VolunteerNeed,
 } from "@/types";
 
 /* ============================================================
@@ -221,11 +232,17 @@ export default function ShowHubPage() {
           showId={showId}
           userId={user.id}
         />
+        <VolunteersSection
+          isTeam={isTeam}
+          showId={showId}
+          userId={user.id}
+          userName={user.displayName}
+        />
       </div>
       {isTeam && (
         <p className="text-[11px] text-clay-400 mt-8">
           Cast members see this same page without the compose and edit
-          controls. Volunteer sign-ups arrive in the next update.
+          controls.
         </p>
       )}
     </div>
@@ -1632,6 +1649,468 @@ function ResourcesSection({
           </div>
         </Card>
       )}
+    </section>
+  );
+}
+
+/* ============================================================
+   6. Volunteers — dual-path (SHOW_HUB_SPEC.md).
+   Company members claim with one tap here; community guests use
+   the public /volunteer/[showId] link (no account — approved
+   gating exception; it's the growth loop).
+   ============================================================ */
+
+type VolunteerDraft = {
+  label: string;
+  eventDate: string;
+  startTime: string; // HH:MM or ""
+  endTime: string;
+  slots: string;
+  notes: string;
+};
+
+const EMPTY_VOLUNTEER_DRAFT: VolunteerDraft = {
+  label: "",
+  eventDate: "",
+  startTime: "",
+  endTime: "",
+  slots: "4",
+  notes: "",
+};
+
+/** "Fri, Jul 12 · 6:00 PM – 9:30 PM" from a need's date + optional times. */
+function shiftWhen(need: {
+  eventDate: string | null;
+  startTime: string | null;
+  endTime: string | null;
+}): string {
+  const parts: string[] = [];
+  if (need.eventDate) {
+    parts.push(
+      new Date(`${need.eventDate}T12:00:00`).toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      })
+    );
+  }
+  if (need.startTime) {
+    parts.push(
+      `${formatTime(need.startTime)}${need.endTime ? ` – ${formatTime(need.endTime)}` : ""}`
+    );
+  }
+  return parts.join(" · ");
+}
+
+function VolunteersSection({
+  isTeam,
+  showId,
+  userId,
+  userName,
+}: {
+  isTeam: boolean;
+  showId: string;
+  userId: ID;
+  userName: string;
+}) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<VolunteerDraft>(EMPTY_VOLUNTEER_DRAFT);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const { data: needs, isLoading } = useQuery({
+    queryKey: ["hubVolunteers", showId],
+    queryFn: () => getVolunteerNeeds(showId),
+  });
+
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: ["hubVolunteers", showId] });
+
+  const buildInput = (): VolunteerNeedInput | null => {
+    if (!draft.label.trim()) {
+      toast("error", "Give the need a label — e.g. \"Ushers\".");
+      return null;
+    }
+    const slots = parseInt(draft.slots, 10);
+    if (!Number.isFinite(slots) || slots < 1) {
+      toast("error", "Slots must be at least 1.");
+      return null;
+    }
+    if (draft.startTime && !draft.eventDate) {
+      toast("error", "Add the event date for those times.");
+      return null;
+    }
+    if (draft.startTime && draft.endTime && draft.endTime <= draft.startTime) {
+      toast("error", "End time must be after the start time.");
+      return null;
+    }
+    const iso = (hhmm: string) =>
+      hhmm && draft.eventDate
+        ? new Date(`${draft.eventDate}T${hhmm}:00`).toISOString()
+        : null;
+    return {
+      showId,
+      label: draft.label.trim(),
+      eventDate: draft.eventDate || null,
+      startTime: iso(draft.startTime),
+      endTime: iso(draft.endTime),
+      slots,
+      notes: draft.notes.trim() || null,
+    };
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const input = buildInput();
+      if (!input) throw new Error("__validation__");
+      return editingId
+        ? updateVolunteerNeed(editingId, input)
+        : createVolunteerNeed(input);
+    },
+    onSuccess: () => {
+      invalidate();
+      toast("success", editingId ? "Volunteer need updated!" : "Volunteer need added!");
+      setModalOpen(false);
+    },
+    onError: (err: Error) => {
+      if (err.message !== "__validation__") toast("error", err.message);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteVolunteerNeed(editingId!),
+    onSuccess: () => {
+      invalidate();
+      toast("info", "Volunteer need removed.");
+      setModalOpen(false);
+    },
+    onError: (err: Error) => toast("error", err.message),
+  });
+
+  const claimMutation = useMutation({
+    mutationFn: (needId: string) =>
+      claimVolunteerSlot({ needId, mockUser: { id: userId, name: userName } }),
+    onSuccess: () => {
+      invalidate();
+      toast("success", "You're on the list — thank you!");
+    },
+    onError: (err: Error) => toast("error", err.message),
+  });
+
+  const unclaimMutation = useMutation({
+    mutationFn: (needId: string) => unclaimVolunteerSlot(needId, userId),
+    onSuccess: () => {
+      invalidate();
+      toast("info", "You gave up your spot.");
+    },
+    onError: (err: Error) => toast("error", err.message),
+  });
+
+  const copyPublicLink = async () => {
+    const url = `${window.location.origin}/volunteer/${showId}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("success", "Public signup link copied — share it with your community!");
+    } catch {
+      toast("error", `Couldn't copy — the link is ${url}`);
+    }
+  };
+
+  const openAdd = () => {
+    setEditingId(null);
+    setDraft(EMPTY_VOLUNTEER_DRAFT);
+    setConfirmDelete(false);
+    setModalOpen(true);
+  };
+
+  const openEdit = (need: VolunteerNeed) => {
+    const toHHMM = (iso: string | null) => {
+      if (!iso) return "";
+      const d = new Date(iso);
+      return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    };
+    setEditingId(need.id);
+    setDraft({
+      label: need.label,
+      eventDate: need.eventDate ?? "",
+      startTime: toHHMM(need.startTime),
+      endTime: toHHMM(need.endTime),
+      slots: String(need.slots),
+      notes: need.notes ?? "",
+    });
+    setConfirmDelete(false);
+    setModalOpen(true);
+  };
+
+  const list = needs ?? [];
+
+  return (
+    <section>
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <SectionHeader className="mb-0">Volunteers</SectionHeader>
+        {isTeam && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={openAdd}
+            icon={<Plus className="w-4 h-4" weight="bold" />}
+          >
+            Add a need
+          </Button>
+        )}
+      </div>
+
+      {/* Share the public link — the community guest path (no account). */}
+      {isTeam && (
+        <Card variant="flat" padding="compact" className="mb-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <HandHeart className="w-6 h-6 text-stage-500 flex-shrink-0" weight="duotone" />
+              <p className="text-sm text-clay-500">
+                Anyone in your community can sign up from the public link — no
+                account needed.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={copyPublicLink}
+              icon={<LinkSimple className="w-4 h-4 text-stage-500" weight="duotone" />}
+            >
+              Share public signup link
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {isLoading ? (
+        <Card variant="flat" padding="standard">
+          <p className="text-sm text-clay-500">Loading volunteer needs…</p>
+        </Card>
+      ) : list.length === 0 ? (
+        <Card variant="flat" padding="standard">
+          <div className="flex items-center gap-3">
+            <HandHeart className="w-6 h-6 text-stage-500 flex-shrink-0" weight="duotone" />
+            <p className="text-sm text-clay-500">
+              {isTeam
+                ? "No volunteer needs yet. Add ushers, concessions, set build — then share the public link."
+                : "No volunteer needs yet. When the team posts them, you can claim a spot with one tap."}
+            </p>
+          </div>
+        </Card>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {list.map((need) => {
+            const filled = need.signups.length;
+            const isFull = filled >= need.slots;
+            const mine = need.signups.find((s) => s.userId === userId);
+            const when = shiftWhen(need);
+            return (
+              <Card key={need.id} variant="elevated" padding="standard">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-curtain-900">{need.label}</p>
+                      {isFull ? (
+                        <Badge variant="success" size="sm">Full</Badge>
+                      ) : (
+                        <Badge variant="warning" size="sm">
+                          {need.slots - filled} open
+                        </Badge>
+                      )}
+                    </div>
+                    {when && (
+                      <p className="text-xs text-clay-500 flex items-center gap-1.5 mt-1">
+                        <Calendar className="w-3.5 h-3.5 text-stage-500" weight="duotone" />
+                        {when}
+                      </p>
+                    )}
+                    {need.notes && (
+                      <p className="text-xs text-clay-500 mt-1">{need.notes}</p>
+                    )}
+                    <p className="text-xs font-medium text-curtain-700 mt-2">
+                      {filled} of {need.slots} filled
+                    </p>
+                    {need.signups.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                        {need.signups.map((s) => (
+                          <Pill key={s.id} variant="status" className="cursor-default">
+                            {s.name}
+                            {s.isGuest && (
+                              <span className="ml-1.5 text-[10px] font-semibold text-clay-400 uppercase tracking-wide">
+                                guest
+                              </span>
+                            )}
+                          </Pill>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex flex-wrap items-center gap-2 mt-3">
+                      {mine ? (
+                        <>
+                          <span className="text-xs font-semibold text-forest-600 flex items-center gap-1">
+                            <CheckCircle className="w-4 h-4" weight="duotone" />
+                            You&apos;re signed up
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => unclaimMutation.mutate(need.id)}
+                            loading={unclaimMutation.isPending && unclaimMutation.variables === need.id}
+                          >
+                            Give up my spot
+                          </Button>
+                        </>
+                      ) : isFull ? (
+                        <span className="text-xs text-clay-400">
+                          All spots are taken — thank you, everyone!
+                        </span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => claimMutation.mutate(need.id)}
+                          loading={claimMutation.isPending && claimMutation.variables === need.id}
+                          icon={<HandHeart className="w-4 h-4 text-stage-500" weight="duotone" />}
+                        >
+                          Claim a spot
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  {isTeam && (
+                    <button
+                      onClick={() => openEdit(need)}
+                      className="text-clay-300 hover:text-stage-500 transition p-1 flex-shrink-0"
+                      aria-label={`Edit ${need.label}`}
+                    >
+                      <PencilSimple className="w-4 h-4" weight="bold" />
+                    </button>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Add / edit volunteer need modal (team) ── */}
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={editingId ? "Edit Volunteer Need" : "Add a Volunteer Need"}
+      >
+        <div className="py-4 flex flex-col gap-4 max-h-[70vh] overflow-y-auto">
+          <div>
+            <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+              What do you need? *
+            </label>
+            <Input
+              value={draft.label}
+              onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+              placeholder='e.g. "Ushers — opening night"'
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+                Event date
+              </label>
+              <Input
+                type="date"
+                value={draft.eventDate}
+                onChange={(e) => setDraft({ ...draft, eventDate: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+                Start
+              </label>
+              <Input
+                type="time"
+                value={draft.startTime}
+                onChange={(e) => setDraft({ ...draft, startTime: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+                End
+              </label>
+              <Input
+                type="time"
+                value={draft.endTime}
+                onChange={(e) => setDraft({ ...draft, endTime: e.target.value })}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+              How many people? *
+            </label>
+            <Input
+              type="number"
+              min={1}
+              value={draft.slots}
+              onChange={(e) => setDraft({ ...draft, slots: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+              Notes
+            </label>
+            <Textarea
+              value={draft.notes}
+              onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
+              rows={2}
+              placeholder="Anything volunteers should know — dress code, where to check in…"
+            />
+          </div>
+
+          <div className="flex items-center justify-between pt-2">
+            {editingId ? (
+              confirmDelete ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-ruby-500 font-medium">
+                    Remove? Signups go with it.
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => deleteMutation.mutate()}
+                    loading={deleteMutation.isPending}
+                  >
+                    Yes, remove
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
+                    Keep
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setConfirmDelete(true)}
+                  icon={<Trash className="w-4 h-4" weight="bold" />}
+                >
+                  Remove need
+                </Button>
+              )
+            ) : (
+              <span />
+            )}
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={() => setModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => saveMutation.mutate()} loading={saveMutation.isPending}>
+                {editingId ? "Save Changes" : "Add Need"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Modal>
     </section>
   );
 }

@@ -319,3 +319,65 @@ export type CommNormItem = {
   contact: string;
   method: string;
 };
+
+/* ── Volunteers — dual-path (Show Hub part 2, SHOW_HUB_SPEC.md) ── */
+
+/** A confirmed signup on a volunteer need. Guests have no userId. */
+export type VolunteerSignupEntry = {
+  id: ID;
+  userId: ID | null;
+  name: string;
+  isGuest: boolean;
+};
+
+export type VolunteerNeed = {
+  id: ID;
+  showId: ID;
+  label: string;
+  /** YYYY-MM-DD (a shift can be date-only, no times). */
+  eventDate: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  slots: number;
+  notes: string | null;
+  /** Confirmed signups (hub view — production members only). */
+  signups: VolunteerSignupEntry[];
+};
+
+/** Anonymous-safe board for the public /volunteer/[showId] page — slot
+ *  counts only, never who signed up. */
+export type VolunteerBoard = {
+  show: {
+    id: ID;
+    title: string;
+    orgName: string;
+    posterUrl: string | null;
+    city: string;
+    state: string;
+    showOpen: string | null;
+    showClose: string | null;
+    performanceLocation: string | null;
+  };
+  needs: {
+    id: ID;
+    label: string;
+    eventDate: string | null;
+    startTime: string | null;
+    endTime: string | null;
+    slots: number;
+    notes: string | null;
+    filled: number;
+  }[];
+};
+
+/** What the tokened cancel page shows — holding the token proves ownership. */
+export type VolunteerShiftInfo = {
+  status: "confirmed" | "cancelled";
+  name: string | null;
+  label: string;
+  eventDate: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  showTitle: string;
+  orgName: string;
+};

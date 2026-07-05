@@ -13,11 +13,20 @@ What it sends today:
   and "Audition in 2 hours" (~2h before), with show, time, and location.
 - **Offer nudges** — "Your offer is waiting" when a cast offer has sat
   unanswered for 48+ hours.
+- **Rehearsal reminders** — T-24h + morning-of, to called people only
+  (needs migration 010).
+- **Volunteer shift reminders** — T-24h to everyone signed up. Members get
+  a notification (email rides the pipeline); community **guests** (no
+  account) get a `guest_emails` queue row instead (needs migration 011).
+- **Guest email delivery** — sends pending `guest_emails` rows (volunteer
+  confirmations queued by `claim_volunteer_slot` + the guest reminders
+  above) directly via Resend. Uses the same `RESEND_API_KEY` /
+  `RESEND_FROM` / `APP_URL` secrets as `SETUP_RESEND.md` — until the key
+  is set, rows wait as `pending` and go out on the first run after it is.
 
-It is idempotent: every send is logged in `reminder_log`, so the same
-reminder can never fire twice even if the cron runs constantly. Week 3
-rehearsal reminders will plug into the same function (there's a marked
-extension point in the code).
+It is idempotent: every member send is logged in `reminder_log`, and every
+guest email carries a unique `dedupe_key`, so the same reminder can never
+fire twice even if the cron runs constantly.
 
 ## 1. Apply migration 008
 

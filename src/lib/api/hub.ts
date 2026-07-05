@@ -19,7 +19,11 @@ import {
   rehearsalAbsences as mockAbsences,
   announcements as mockAnnouncements,
   commNorms as mockCommNorms,
+  volunteerNeeds as mockVolunteerNeeds,
+  volunteerSignups as mockVolunteerSignups,
+  type MockVolunteerNeed,
 } from "@/data/hub";
+import { shows as mockShows } from "@/data/shows";
 import { actors } from "@/data/actors";
 import type {
   ID,
@@ -36,6 +40,10 @@ import type {
   CommNormItem,
   CalledScope,
   CalledGroup,
+  VolunteerNeed,
+  VolunteerSignupEntry,
+  VolunteerBoard,
+  VolunteerShiftInfo,
 } from "@/types";
 
 const delay = (ms = 200) => new Promise((r) => setTimeout(r, ms));
@@ -854,4 +862,381 @@ export function nameForUser(
     if (actor) return actor.displayName;
   }
   return "";
+}
+
+/* ============================================================
+   Volunteers — dual-path (SHOW_HUB_SPEC.md).
+   Company members: one-tap claim/unclaim from the hub.
+   Community guests: NO account — the public /volunteer/[showId]
+   page claims through the SECURITY DEFINER claim_volunteer_slot
+   RPC (anon-safe, capacity-checked). This is the approved
+   exception to the access-gating rule.
+   ============================================================ */
+
+function mockNeedToVolunteerNeed(n: MockVolunteerNeed): VolunteerNeed {
+  return {
+    id: n.id,
+    showId: n.showId,
+    label: n.label,
+    eventDate: n.eventDate,
+    startTime: n.startTime,
+    endTime: n.endTime,
+    slots: n.slots,
+    notes: n.notes,
+    signups: mockVolunteerSignups
+      .filter((s) => s.needId === n.id && s.status === "confirmed")
+      .map((s) => ({
+        id: s.id,
+        userId: s.userId,
+        name: s.name,
+        isGuest: s.userId === null,
+      })),
+  };
+}
+
+/** Hub view — needs + who's signed up. Production members only (RLS). */
+export async function getVolunteerNeeds(showId: string): Promise<VolunteerNeed[]> {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await getSupabase()
+        .from("volunteer_needs")
+        .select(
+          "*, volunteer_signups(id, user_id, guest_name, status, profiles:user_id(display_name))"
+        )
+        .eq("show_id", showId)
+        .order("event_date", { ascending: true, nullsFirst: false })
+        .order("label");
+      if (error) throw error;
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      return (data ?? []).map((n: any) => ({
+        id: n.id,
+        showId: n.show_id,
+        label: n.label,
+        eventDate: n.event_date ?? null,
+        startTime: n.start_time ?? null,
+        endTime: n.end_time ?? null,
+        slots: n.slots,
+        notes: n.notes ?? null,
+        signups: (n.volunteer_signups ?? [])
+          .filter((s: any) => s.status === "confirmed")
+          .map(
+            (s: any): VolunteerSignupEntry => ({
+              id: s.id,
+              userId: s.user_id ?? null,
+              name: s.profiles?.display_name ?? s.guest_name ?? "Volunteer",
+              isGuest: !s.user_id,
+            })
+          ),
+      }));
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+    } catch (e) {
+      console.warn("getVolunteerNeeds — table may not exist yet (paste migration 010/011):", e);
+      return [];
+    }
+  }
+  await delay();
+  return mockVolunteerNeeds
+    .filter((n) => n.showId === showId)
+    .map(mockNeedToVolunteerNeed);
+}
+
+export type VolunteerNeedInput = {
+  showId: ID;
+  label: string;
+  eventDate: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  slots: number;
+  notes: string | null;
+};
+
+export async function createVolunteerNeed(
+  input: VolunteerNeedInput
+): Promise<VolunteerNeed> {
+  if (isSupabaseConfigured) {
+    const { data, error } = await getSupabase()
+      .from("volunteer_needs")
+      .insert({
+        show_id: input.showId,
+        label: input.label,
+        event_date: input.eventDate,
+        start_time: input.startTime,
+        end_time: input.endTime,
+        slots: input.slots,
+        notes: input.notes,
+      })
+      .select("*")
+      .single();
+    if (error) throw new Error(error.message);
+    return {
+      id: data.id,
+      showId: data.show_id,
+      label: data.label,
+      eventDate: data.event_date ?? null,
+      startTime: data.start_time ?? null,
+      endTime: data.end_time ?? null,
+      slots: data.slots,
+      notes: data.notes ?? null,
+      signups: [],
+    };
+  }
+  await delay(250);
+  const need: MockVolunteerNeed = {
+    id: `vol-${Date.now()}`,
+    showId: input.showId,
+    label: input.label,
+    eventDate: input.eventDate,
+    startTime: input.startTime,
+    endTime: input.endTime,
+    slots: input.slots,
+    notes: input.notes,
+  };
+  mockVolunteerNeeds.push(need);
+  return mockNeedToVolunteerNeed(need);
+}
+
+export async function updateVolunteerNeed(
+  needId: string,
+  input: VolunteerNeedInput
+): Promise<void> {
+  if (isSupabaseConfigured) {
+    const { error } = await getSupabase()
+      .from("volunteer_needs")
+      .update({
+        label: input.label,
+        event_date: input.eventDate,
+        start_time: input.startTime,
+        end_time: input.endTime,
+        slots: input.slots,
+        notes: input.notes,
+      })
+      .eq("id", needId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  await delay(200);
+  const need = mockVolunteerNeeds.find((n) => n.id === needId);
+  if (!need) throw new Error("Volunteer need not found.");
+  Object.assign(need, {
+    label: input.label,
+    eventDate: input.eventDate,
+    startTime: input.startTime,
+    endTime: input.endTime,
+    slots: input.slots,
+    notes: input.notes,
+  });
+}
+
+export async function deleteVolunteerNeed(needId: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    const { error } = await getSupabase()
+      .from("volunteer_needs")
+      .delete()
+      .eq("id", needId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  await delay(200);
+  const idx = mockVolunteerNeeds.findIndex((n) => n.id === needId);
+  if (idx !== -1) mockVolunteerNeeds.splice(idx, 1);
+  for (let i = mockVolunteerSignups.length - 1; i >= 0; i--) {
+    if (mockVolunteerSignups[i].needId === needId) mockVolunteerSignups.splice(i, 1);
+  }
+}
+
+/**
+ * Claim a slot — both paths. Signed-in users claim as themselves (the RPC
+ * reads auth.uid()); anonymous guests pass name + email (phone optional).
+ * Returns the signup's cancel token (drives the no-login cancel link).
+ * `mockUser` is only used by mock mode to record who claimed.
+ */
+export async function claimVolunteerSlot(input: {
+  needId: ID;
+  guestName?: string;
+  guestEmail?: string;
+  guestPhone?: string;
+  mockUser?: { id: ID; name: string } | null;
+}): Promise<string> {
+  if (isSupabaseConfigured) {
+    const { data, error } = await getSupabase().rpc("claim_volunteer_slot", {
+      p_need_id: input.needId,
+      p_guest_name: input.guestName ?? null,
+      p_guest_email: input.guestEmail ?? null,
+      p_guest_phone: input.guestPhone ?? null,
+    });
+    if (error) throw new Error(error.message);
+    return data as string;
+  }
+  await delay(300);
+  const need = mockVolunteerNeeds.find((n) => n.id === input.needId);
+  if (!need) throw new Error("This volunteer need no longer exists.");
+  const confirmed = mockVolunteerSignups.filter(
+    (s) => s.needId === input.needId && s.status === "confirmed"
+  );
+  if (confirmed.length >= need.slots) {
+    throw new Error("All slots for this shift are filled — thank you anyway!");
+  }
+  const user = input.mockUser ?? null;
+  if (user) {
+    if (confirmed.some((s) => s.userId === user.id)) {
+      throw new Error("You already have a spot on this shift.");
+    }
+  } else {
+    if (!input.guestName?.trim() || !input.guestEmail?.trim()) {
+      throw new Error("Name and email are required to sign up.");
+    }
+    if (
+      confirmed.some(
+        (s) =>
+          s.guestEmail?.toLowerCase() === input.guestEmail!.trim().toLowerCase()
+      )
+    ) {
+      throw new Error("You already have a spot on this shift.");
+    }
+  }
+  const id = `vs-${Date.now()}`;
+  const token = `mock-token-${id}`;
+  mockVolunteerSignups.push({
+    id,
+    needId: input.needId,
+    userId: user?.id ?? null,
+    name: user?.name ?? input.guestName!.trim(),
+    guestEmail: user ? null : input.guestEmail!.trim().toLowerCase(),
+    cancelToken: token,
+    status: "confirmed",
+  });
+  return token;
+}
+
+/** Member one-tap unclaim — finds your own signup and cancels via its token. */
+export async function unclaimVolunteerSlot(
+  needId: string,
+  userId: string
+): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from("volunteer_signups")
+      .select("cancel_token")
+      .eq("need_id", needId)
+      .eq("user_id", userId)
+      .eq("status", "confirmed")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new Error("You don't have a spot on this shift.");
+    const { error: rpcError } = await supabase.rpc("cancel_volunteer_signup", {
+      p_cancel_token: data.cancel_token,
+    });
+    if (rpcError) throw new Error(rpcError.message);
+    return;
+  }
+  await delay(200);
+  const signup = mockVolunteerSignups.find(
+    (s) => s.needId === needId && s.userId === userId && s.status === "confirmed"
+  );
+  if (!signup) throw new Error("You don't have a spot on this shift.");
+  signup.status = "cancelled";
+}
+
+/* ── Public guest path — anonymous-safe reads via SECURITY DEFINER RPCs ── */
+
+/** The public volunteer board: show header + needs with fill counts only. */
+export async function getVolunteerBoard(
+  showId: string
+): Promise<VolunteerBoard | null> {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await getSupabase().rpc("get_volunteer_page", {
+        p_show_id: showId,
+      });
+      if (error) throw error;
+      return (data as VolunteerBoard | null) ?? null;
+    } catch (e) {
+      console.warn("getVolunteerBoard — RPC may not exist yet (paste migration 011):", e);
+      return null;
+    }
+  }
+  await delay();
+  const show = mockShows.find((s) => s.id === showId);
+  if (!show) return null;
+  return {
+    show: {
+      id: show.id,
+      title: show.title,
+      orgName: show.orgName,
+      posterUrl: show.posterUrl,
+      city: show.city,
+      state: show.state,
+      showOpen: show.showOpen,
+      showClose: show.showClose,
+      performanceLocation: show.performanceLocation,
+    },
+    needs: mockVolunteerNeeds
+      .filter((n) => n.showId === showId)
+      .map((n) => ({
+        id: n.id,
+        label: n.label,
+        eventDate: n.eventDate,
+        startTime: n.startTime,
+        endTime: n.endTime,
+        slots: n.slots,
+        notes: n.notes,
+        filled: mockVolunteerSignups.filter(
+          (s) => s.needId === n.id && s.status === "confirmed"
+        ).length,
+      })),
+  };
+}
+
+/** Shift details for the tokened cancel page. */
+export async function getVolunteerShiftInfo(
+  cancelToken: string
+): Promise<VolunteerShiftInfo | null> {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await getSupabase().rpc(
+        "get_volunteer_signup_info",
+        { p_cancel_token: cancelToken }
+      );
+      if (error) throw error;
+      return (data as VolunteerShiftInfo | null) ?? null;
+    } catch (e) {
+      console.warn("getVolunteerShiftInfo — RPC may not exist yet (paste migration 011):", e);
+      return null;
+    }
+  }
+  await delay();
+  const signup = mockVolunteerSignups.find((s) => s.cancelToken === cancelToken);
+  if (!signup) return null;
+  const need = mockVolunteerNeeds.find((n) => n.id === signup.needId);
+  if (!need) return null;
+  const show = mockShows.find((s) => s.id === need.showId);
+  return {
+    status: signup.status,
+    name: signup.name,
+    label: need.label,
+    eventDate: need.eventDate,
+    startTime: need.startTime,
+    endTime: need.endTime,
+    showTitle: show?.title ?? "your show",
+    orgName: show?.orgName ?? "",
+  };
+}
+
+/** Tokened cancel — no login required. Returns false if already cancelled. */
+export async function cancelVolunteerByToken(
+  cancelToken: string
+): Promise<boolean> {
+  if (isSupabaseConfigured) {
+    const { data, error } = await getSupabase().rpc("cancel_volunteer_signup", {
+      p_cancel_token: cancelToken,
+    });
+    if (error) throw new Error(error.message);
+    return !!data;
+  }
+  await delay(250);
+  const signup = mockVolunteerSignups.find((s) => s.cancelToken === cancelToken);
+  if (!signup || signup.status !== "confirmed") return false;
+  signup.status = "cancelled";
+  return true;
 }
