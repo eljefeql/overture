@@ -21,5 +21,6 @@ export { ProductionSubNav } from "./ProductionSubNav";
 export { StepIndicator } from "./StepIndicator";
 export { Lightbox } from "./Lightbox";
 export type { LightboxPhoto } from "./Lightbox";
+export { PreviewBanner } from "./PreviewBanner";
 export { RichTextEditor } from "./RichTextEditor";
 export { Markdown } from "./Markdown";

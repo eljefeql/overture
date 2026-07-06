@@ -37,9 +37,7 @@ export function ProductionTopNav({ currentShowId, currentShowTitle }: Props) {
   const pathname = usePathname();
   const router = useRouter();
 
-  const [switcherOpen, setSwitcherOpen] = useState(false);
   const [avatarOpen, setAvatarOpen] = useState(false);
-  const switcherRef = useRef<HTMLDivElement>(null);
   const avatarRef = useRef<HTMLDivElement>(null);
 
   // Get org shows for the switcher
@@ -50,34 +48,42 @@ export function ProductionTopNav({ currentShowId, currentShowTitle }: Props) {
     enabled: !!orgId,
   });
 
-  // Close dropdowns on outside click
+  // Close avatar dropdown on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (switcherRef.current && !switcherRef.current.contains(e.target as Node)) {
-        setSwitcherOpen(false);
-      }
       if (avatarRef.current && !avatarRef.current.contains(e.target as Node)) {
         setAvatarOpen(false);
       }
     }
-    if (switcherOpen || avatarOpen) {
+    if (avatarOpen) {
       document.addEventListener("mousedown", handleClick);
       return () => document.removeEventListener("mousedown", handleClick);
     }
-  }, [switcherOpen, avatarOpen]);
+  }, [avatarOpen]);
 
   // Close on route change
   useEffect(() => {
-    setSwitcherOpen(false);
     setAvatarOpen(false);
   }, [pathname]);
 
-  const isOnShowsList = pathname === "/shows";
+  // Persistent links — rendered on EVERY production page (theatre hub, shows
+  // list, /shows/new, inside a show), desktop AND mobile. "My Shows" highlights
+  // at the list level; inside a show the show switcher carries the location.
+  const isOnShowsList = pathname === "/shows" || pathname === "/shows/new";
+  const isOnOrgHub = pathname?.startsWith("/org") ?? false;
+
+  const persistentLinkClass = (active: boolean) =>
+    cn(
+      "px-2.5 sm:px-3 py-1.5 text-sm font-medium rounded-lg transition whitespace-nowrap",
+      active
+        ? "text-white bg-curtain-800"
+        : "text-curtain-300 hover:text-white hover:bg-curtain-800"
+    );
 
   return (
     <nav className="bg-curtain-900 text-white sticky top-0 z-30">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        <div className="flex items-center justify-between h-14">
+        <div className="flex items-center justify-between h-14 gap-2">
           {/* Left: Logo */}
           <Link href="/shows" className="flex items-center gap-2.5 flex-shrink-0">
             <div className="w-8 h-8 rounded-lg bg-stage-500 flex items-center justify-center">
@@ -85,66 +91,29 @@ export function ProductionTopNav({ currentShowId, currentShowTitle }: Props) {
                 O
               </span>
             </div>
-            <span className="text-base font-display text-white">
+            <span className="text-base font-display text-white hidden sm:inline">
               Overture
             </span>
           </Link>
 
-          {/* Center: Show Switcher or "My Shows" label */}
-          <div className="flex-1 flex justify-center">
-            {isOnShowsList ? (
-              <span className="text-sm font-semibold text-curtain-300">
-                My Shows
-              </span>
-            ) : currentShowTitle ? (
-              <div className="relative" ref={switcherRef}>
-                <button
-                  onClick={() => setSwitcherOpen(!switcherOpen)}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold text-white hover:bg-curtain-800 transition"
-                >
-                  {currentShowTitle}
-                  <CaretDown className="w-3 h-3" weight="bold" />
-                </button>
-
-                {switcherOpen && (
-                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 w-72 bg-white rounded-xl shadow-lg border border-cream-200 py-1 z-50">
-                    {/* Show list */}
-                    {orgShows?.map((show) => (
-                      <Link
-                        key={show.id}
-                        href={`/shows/${show.id}/setup`}
-                        className={cn(
-                          "flex items-center gap-2.5 px-4 py-2.5 text-sm transition",
-                          show.id === currentShowId
-                            ? "text-curtain-900 bg-cream-50 font-semibold"
-                            : "text-curtain-700 hover:bg-cream-50"
-                        )}
-                      >
-                        <span className="flex-1 truncate">{show.title}</span>
-                        {show.id === currentShowId && (
-                          <Check className="w-4 h-4 text-stage-500" weight="bold" />
-                        )}
-                      </Link>
-                    ))}
-                    <hr className="border-cream-100 my-1" />
-                    <Link
-                      href="/shows"
-                      className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-700 hover:bg-cream-50 transition"
-                    >
-                      <ListIcon className="w-4 h-4 text-stage-500" weight="duotone" />
-                      View All Shows
-                    </Link>
-                    <Link
-                      href="/shows/new"
-                      className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-700 hover:bg-cream-50 transition"
-                    >
-                      <Plus className="w-4 h-4 text-stage-500" weight="bold" />
-                      New Show
-                    </Link>
-                  </div>
-                )}
+          {/* Center: persistent links + (desktop) show switcher when inside a show */}
+          <div className="flex-1 flex items-center justify-center gap-1 min-w-0">
+            <Link href="/shows" className={persistentLinkClass(isOnShowsList)}>
+              My Shows
+            </Link>
+            <Link href="/org" className={persistentLinkClass(isOnOrgHub)}>
+              My Theatre
+            </Link>
+            {currentShowTitle && (
+              <div className="hidden md:block min-w-0">
+                <ShowSwitcher
+                  currentShowId={currentShowId}
+                  currentShowTitle={currentShowTitle}
+                  orgShows={orgShows}
+                  align="center"
+                />
               </div>
-            ) : null}
+            )}
           </div>
 
           {/* Right: Avatar dropdown */}
@@ -211,7 +180,117 @@ export function ProductionTopNav({ currentShowId, currentShowTitle }: Props) {
             </div>
           )}
         </div>
+
+        {/* Mobile: show switcher gets its own slim row — the top bar can't fit
+            links + a show title at phone widths, and the show name must stay
+            visible and labeled (never a mystery menu). */}
+        {currentShowTitle && (
+          <div className="md:hidden pb-2">
+            <ShowSwitcher
+              currentShowId={currentShowId}
+              currentShowTitle={currentShowTitle}
+              orgShows={orgShows}
+              align="left"
+            />
+          </div>
+        )}
       </div>
     </nav>
+  );
+}
+
+/* ============================================================
+   ShowSwitcher — the labeled current-show dropdown
+
+   Rendered inline (desktop) or on its own row (mobile). Always
+   shows the current show's TITLE so it's never an unlabeled menu.
+   ============================================================ */
+
+function ShowSwitcher({
+  currentShowId,
+  currentShowTitle,
+  orgShows,
+  align,
+}: {
+  currentShowId?: string;
+  currentShowTitle: string;
+  orgShows?: { id: string; title: string }[];
+  align: "center" | "left";
+}) {
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener("mousedown", handleClick);
+      return () => document.removeEventListener("mousedown", handleClick);
+    }
+  }, [open]);
+
+  // Close on route change
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+
+  return (
+    <div className="relative min-w-0" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 max-w-full px-2.5 sm:px-3 py-1.5 rounded-lg text-sm font-semibold text-white bg-curtain-800/60 hover:bg-curtain-800 transition"
+      >
+        <span className="truncate">{currentShowTitle}</span>
+        <CaretDown className="w-3 h-3 flex-shrink-0" weight="bold" />
+      </button>
+
+      {open && (
+        <div
+          className={cn(
+            "absolute top-full mt-1 w-72 max-w-[calc(100vw-2rem)] bg-white rounded-xl shadow-lg border border-cream-200 py-1 z-50",
+            align === "center" ? "left-1/2 -translate-x-1/2" : "left-0"
+          )}
+        >
+          {/* Show list */}
+          {orgShows?.map((show) => (
+            <Link
+              key={show.id}
+              href={`/shows/${show.id}/setup`}
+              className={cn(
+                "flex items-center gap-2.5 px-4 py-2.5 text-sm transition",
+                show.id === currentShowId
+                  ? "text-curtain-900 bg-cream-50 font-semibold"
+                  : "text-curtain-700 hover:bg-cream-50"
+              )}
+            >
+              <span className="flex-1 truncate">{show.title}</span>
+              {show.id === currentShowId && (
+                <Check className="w-4 h-4 text-stage-500" weight="bold" />
+              )}
+            </Link>
+          ))}
+          <hr className="border-cream-100 my-1" />
+          <Link
+            href="/shows"
+            className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-700 hover:bg-cream-50 transition"
+          >
+            <ListIcon className="w-4 h-4 text-stage-500" weight="duotone" />
+            View All Shows
+          </Link>
+          <Link
+            href="/shows/new"
+            className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-700 hover:bg-cream-50 transition"
+          >
+            <Plus className="w-4 h-4 text-stage-500" weight="bold" />
+            New Show
+          </Link>
+        </div>
+      )}
+    </div>
   );
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getShowSeo } from "@/lib/seo";
+import { PreviewBanner } from "@/components/ui/PreviewBanner";
 
 /**
  * Metadata-only wrapper — the volunteer signup page itself is a client
@@ -30,10 +31,20 @@ export async function generateMetadata({
   return { title, description };
 }
 
-export default function VolunteerLayout({
+export default async function VolunteerLayout({
   children,
+  params,
 }: {
   children: React.ReactNode;
+  params: Promise<{ showId: string }>;
 }) {
-  return children;
+  const { showId } = await params;
+  // Team/org-admin viewers get the preview banner; it links back to the Hub
+  // because that's where the volunteer needs (and the share link) live.
+  return (
+    <>
+      <PreviewBanner kind="show" showId={showId} backSegment="hub" />
+      {children}
+    </>
+  );
 }

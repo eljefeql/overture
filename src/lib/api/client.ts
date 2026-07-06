@@ -413,13 +413,31 @@ export async function getMyOrgMembership(
 /**
  * Can this user work on this show's production pages?
  * True when they're on the show team OR an owner/admin of the show's org.
- * Mock mode always allows (no membership data to check).
+ * Mock mode checks the mock team/membership data (so e.g. director Sarah
+ * passes for show-1 but actor Maria doesn't — the public-page preview
+ * banner relies on this distinction).
  */
 export async function getShowAccess(
   showId: string,
   userId: string
 ): Promise<boolean> {
-  if (!isSupabaseConfigured) return true;
+  if (!isSupabaseConfigured) {
+    await delay();
+    if (showTeam.some((m) => m.showId === showId && m.userId === userId)) {
+      return true;
+    }
+    const show = shows.find((s) => s.id === showId);
+    return (
+      !!show &&
+      orgMembers.some(
+        (m) =>
+          m.orgId === show.orgId &&
+          m.userId === userId &&
+          m.status === "active" &&
+          (m.role === "owner" || m.role === "admin")
+      )
+    );
+  }
   const supabase = getSupabase();
   const [{ data: teamRow }, { data: showRow }] = await Promise.all([
     supabase
@@ -440,6 +458,35 @@ export async function getShowAccess(
     .in("role", ["owner", "admin"])
     .maybeSingle();
   return !!memberRow;
+}
+
+/**
+ * Is this user an active member of this org (any role)? Powers the
+ * public-page preview banner on /theatres/[orgId] — deliberately looser
+ * than owner/admin because any member benefits from "back to your theatre".
+ * Silent-fails to false so public pages never break on it.
+ */
+export async function getOrgAccess(
+  orgId: string,
+  userId: string
+): Promise<boolean> {
+  if (!isSupabaseConfigured) {
+    await delay();
+    return orgMembers.some(
+      (m) => m.orgId === orgId && m.userId === userId && m.status === "active"
+    );
+  }
+  try {
+    const { data } = await getSupabase()
+      .from("org_members")
+      .select("id")
+      .eq("org_id", orgId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    return !!data;
+  } catch {
+    return false;
+  }
 }
 
 /**

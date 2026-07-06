@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getOrgSeo } from "@/lib/seo";
+import { PreviewBanner } from "@/components/ui/PreviewBanner";
 
 /**
  * Metadata-only wrapper — the theatre page itself is a client component,
@@ -31,10 +32,20 @@ export async function generateMetadata({
   return { title, description };
 }
 
-export default function TheatreLayout({
+export default async function TheatreLayout({
   children,
+  params,
 }: {
   children: React.ReactNode;
+  params: Promise<{ orgId: string }>;
 }) {
-  return children;
+  const { orgId } = await params;
+  // Members of this theatre get a slim "you're seeing the public page"
+  // banner linking back to /org. Everyone else never sees it.
+  return (
+    <>
+      <PreviewBanner kind="theatre" orgId={orgId} />
+      {children}
+    </>
+  );
 }

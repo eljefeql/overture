@@ -30,7 +30,7 @@ import {
    ============================================================ */
 
 export function Nav() {
-  const { user, activeRole, logout } = useAuth();
+  const { user, logout } = useAuth();
   const { org } = useOrg();
   const pathname = usePathname();
   const router = useRouter();
@@ -65,23 +65,17 @@ export function Nav() {
 
   // Notifications intentionally absent — the bell icon (with unread badge)
   // is the single entry point to /notifications.
-  const actorLinks = [
+  //
+  // This nav ALWAYS renders actor links — it never reads activeRole.
+  // Show-scoped menus live exclusively in ProductionTopNav/ProductionSubNav
+  // inside the (production) group; theatre folks reach their theatre via
+  // the "My Theatre" entry in the avatar dropdown / mobile menu below.
+  // (Nav redesign, owner-authorized 2026-07-05 — killed the stale teamLinks leak.)
+  const links = [
     { href: "/discover", label: "Discover", icon: MagnifyingGlass },
     { href: "/my-shows", label: "My Shows", icon: MaskHappy },
     { href: "/profile", label: "Profile", icon: UserCircle },
   ];
-
-  const teamLinks = activeRole.type === "team"
-    ? [
-        { href: "/shows", label: "My Shows", icon: MaskHappy },
-        { href: `/shows/${activeRole.showId}/auditions`, label: "Auditions", icon: MagnifyingGlass },
-        { href: `/shows/${activeRole.showId}/callbacks`, label: "Callbacks", icon: Bell },
-        { href: `/shows/${activeRole.showId}/casting`, label: "Casting", icon: UserCircle },
-        { href: `/shows/${activeRole.showId}/cast-list`, label: "Cast List", icon: MaskHappy },
-      ]
-    : [];
-
-  const links = activeRole.type === "actor" ? actorLinks : teamLinks;
 
   const isActive = (href: string) => {
     if (href === "/discover") return pathname === "/discover" || pathname?.startsWith("/auditions/");

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getShowSeo } from "@/lib/seo";
+import { PreviewBanner } from "@/components/ui/PreviewBanner";
 
 /**
  * Metadata-only wrapper — the audition page itself is a client component,
@@ -36,10 +37,20 @@ export async function generateMetadata({
   return { title, description };
 }
 
-export default function AuditionLayout({
+export default async function AuditionLayout({
   children,
+  params,
 }: {
   children: React.ReactNode;
+  params: Promise<{ id: string }>;
 }) {
-  return children;
+  const { id } = await params;
+  // Show team / org-admin viewers get a slim "you're seeing the public page"
+  // banner with a way back to the show. Actors and anonymous visitors never do.
+  return (
+    <>
+      <PreviewBanner kind="show" showId={id} backSegment="setup" />
+      {children}
+    </>
+  );
 }
