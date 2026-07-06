@@ -165,10 +165,10 @@ export default function PrivacyPage() {
             Ask for a copy of the data we hold about you, or ask us to
             <strong> delete your account and data</strong> — email{" "}
             <a
-              href="mailto:hello@overturecasting.com"
+              href="mailto:hello@overturestage.com"
               className="text-curtain-700 underline underline-offset-2 hover:text-curtain-900"
             >
-              hello@overturecasting.com
+              hello@overturestage.com
             </a>{" "}
             and we&apos;ll take care of it. Guardians can do the same for a
             minor&apos;s account.

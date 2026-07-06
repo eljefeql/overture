@@ -437,10 +437,10 @@ export default function LandingPage() {
                 </li>
                 <li>
                   <a
-                    href="mailto:hello@overturecasting.com"
+                    href="mailto:hello@overturestage.com"
                     className="text-sm text-curtain-300 hover:text-white transition"
                   >
-                    hello@overturecasting.com
+                    hello@overturestage.com
                   </a>
                 </li>
               </ul>

@@ -114,7 +114,7 @@ export default function RehearsalScheduleTemplatePage() {
 
       <p className="text-[10px] text-[#888] text-center mt-8">
         Template from Overture — free casting &amp; production tools for community
-        theatre · overturecasting.com/resources
+        theatre · overturestage.com/resources
       </p>
     </TemplatePage>
   );

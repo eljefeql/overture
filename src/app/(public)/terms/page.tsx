@@ -145,10 +145,10 @@ export default function TermsPage() {
         <p>
           Questions about these terms? Email us at{" "}
           <a
-            href="mailto:hello@overturecasting.com"
+            href="mailto:hello@overturestage.com"
             className="text-curtain-700 underline underline-offset-2 hover:text-curtain-900"
           >
-            hello@overturecasting.com
+            hello@overturestage.com
           </a>
           .
         </p>
