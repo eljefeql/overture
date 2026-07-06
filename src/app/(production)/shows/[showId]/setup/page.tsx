@@ -47,6 +47,7 @@ import {
   Trash,
   Play,
   Pause,
+  ArrowLeft,
   ArrowRight,
   Warning,
   Calendar,
@@ -78,6 +79,36 @@ const NEXT_STATUS: Partial<Record<ShowStatus, { label: string; next: ShowStatus;
   auditions_closed: { label: "Move to Callbacks", next: "callbacks", confirm: "Move to the callback phase?" },
   callbacks: { label: "Move to Casting", next: "casting", confirm: "Move to casting? Make sure all callbacks have been sent." },
   casting: { label: "Publish Cast List", next: "cast", confirm: "Publish the cast list? This will notify all actors." },
+};
+
+// Backward transitions — only statuses with a SAFE step back. Deliberately
+// no entry for 'cast': un-publishing a cast list lives on the Cast List page
+// (Unpublish), so the setup page points there instead of duplicating it.
+const PREV_STATUS: Partial<Record<ShowStatus, { label: string; prev: ShowStatus; confirm: string; warning: string }>> = {
+  auditions_closed: {
+    label: "Reopen Auditions",
+    prev: "auditions_open",
+    confirm: "Reopen auditions?",
+    warning: "The show becomes publicly signable again — new actors will be able to sign up.",
+  },
+  callbacks: {
+    label: "Back to Auditions Closed",
+    prev: "auditions_closed",
+    confirm: "Step back to the closed-auditions phase?",
+    warning: "Callbacks you've already created are kept, but actors already notified about callbacks won't be un-notified.",
+  },
+  casting: {
+    label: "Back to Callbacks",
+    prev: "callbacks",
+    confirm: "Step back to the callback phase?",
+    warning: "Your casting-board work is kept. Any offers you've already sent stay active — actors won't be notified of this change.",
+  },
+  archived: {
+    label: "Restore from Archive",
+    prev: "cast",
+    confirm: "Restore this show from the archive?",
+    warning: "The show returns to your active shows with its cast list and history intact.",
+  },
 };
 
 const SHOW_TYPES: { value: ShowType; label: string }[] = [
@@ -145,6 +176,7 @@ export default function ShowSetupPage() {
 
   // Modal states
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [stepBackOpen, setStepBackOpen] = useState(false);
   const [editDetailsOpen, setEditDetailsOpen] = useState(false);
   const [addRoleOpen, setAddRoleOpen] = useState(false);
   const [editRoleOpen, setEditRoleOpen] = useState(false);
@@ -216,6 +248,7 @@ export default function ShowSetupPage() {
       queryClient.invalidateQueries({ queryKey: ["shows"] });
       toast("success", "Show status updated!");
       setConfirmOpen(false);
+      setStepBackOpen(false);
     },
     onError: (err: Error) => toast("error", err.message),
   });
@@ -332,6 +365,7 @@ export default function ShowSetupPage() {
 
   const { show, roles, team, groups, signups, callbacks: cbs } = data;
   const nextAction = NEXT_STATUS[show.status];
+  const backAction = PREV_STATUS[show.status];
 
   // ── Checklist state (only meaningful while the show is being set up) ──
   const hasRoles = roles.length > 0;
@@ -635,14 +669,39 @@ export default function ShowSetupPage() {
           </div>
         </div>
 
-        {nextAction && (
-          <Button
-            onClick={() => setConfirmOpen(true)}
-            icon={show.status === "auditions_open" ? <Pause className="w-4 h-4" weight="bold" /> : <Play className="w-4 h-4" weight="bold" />}
-          >
-            {nextAction.label}
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {backAction && (
+            <Button
+              variant="ghost"
+              onClick={() => setStepBackOpen(true)}
+              icon={<ArrowLeft className="w-4 h-4" weight="bold" />}
+            >
+              Step back
+            </Button>
+          )}
+          {show.status === "cast" && (
+            // Un-publishing a cast list is the Cast List page's Unpublish —
+            // point there instead of duplicating the flow.
+            <Button
+              variant="ghost"
+              onClick={() => {
+                toast("info", "To step back from a published cast list, use Unpublish on the Cast List page.");
+                router.push(`/shows/${showId}/cast-list`);
+              }}
+              icon={<ArrowLeft className="w-4 h-4" weight="bold" />}
+            >
+              Step back
+            </Button>
+          )}
+          {nextAction && (
+            <Button
+              onClick={() => setConfirmOpen(true)}
+              icon={show.status === "auditions_open" ? <Pause className="w-4 h-4" weight="bold" /> : <Play className="w-4 h-4" weight="bold" />}
+            >
+              {nextAction.label}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* ── Progress Checklist (lead with this while setting up) ── */}
@@ -1036,6 +1095,32 @@ export default function ShowSetupPage() {
               loading={statusMutation.isPending}
             >
               {nextAction?.label}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Step Back Confirmation Modal ── */}
+      <Modal open={stepBackOpen} onClose={() => setStepBackOpen(false)} title="Step Back">
+        <div className="flex flex-col items-center text-center py-4">
+          <Warning className="w-12 h-12 text-stage-500 mb-3" weight="duotone" />
+          <p className="text-sm text-curtain-800 mb-2">
+            {backAction?.confirm}
+          </p>
+          {/* Honest warning about what stepping back does (and doesn't) undo */}
+          {backAction?.warning && (
+            <p className="text-xs text-ruby-500 mb-4 max-w-sm">{backAction.warning}</p>
+          )}
+          <div className="flex gap-3">
+            <Button variant="ghost" onClick={() => setStepBackOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => backAction && statusMutation.mutate(backAction.prev)}
+              loading={statusMutation.isPending}
+            >
+              {backAction?.label}
             </Button>
           </div>
         </div>

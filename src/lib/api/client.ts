@@ -1705,6 +1705,48 @@ export async function getSlotAvailability(
   }));
 }
 
+/** "Maria Santos" → "Maria S." — single-word names returned as-is. */
+function toFirstNameLastInitial(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return parts[0] ?? "";
+  return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+}
+
+/**
+ * Who's auditioning in each block — SIGNED-IN viewers only, and only ever
+ * "First L." (owner-set privacy line; no profile links). Anonymous visitors
+ * get counts via getSlotAvailability, never names. Cloud: get_signup_names
+ * SECURITY DEFINER RPC (migration 013) — degrades to [] pre-paste.
+ */
+export async function getSignupNames(
+  showId: string
+): Promise<{ groupId: string; name: string }[]> {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await getSupabase().rpc("get_signup_names", {
+        p_show_id: showId,
+      });
+      if (error) throw new Error(error.message);
+      /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+      return (data ?? []).map((r: any) => ({
+        groupId: r.group_id,
+        name: r.display_name,
+      }));
+    } catch (err) {
+      // Pre-migration-013 (or anon caller): names simply don't show.
+      console.warn("get_signup_names RPC unavailable:", (err as Error).message);
+      return [];
+    }
+  }
+  await delay();
+  return auditionSignups
+    .filter(
+      (s) => s.showId === showId && s.status !== "withdrawn" && s.groupId !== null
+    )
+    .map((s) => ({ groupId: s.groupId as string, name: toFirstNameLastInitial(s.actorName) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function signUpForAudition(signup: {
   showId: string;
   actorId: string;

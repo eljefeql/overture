@@ -9,6 +9,7 @@ import {
   getShowTeam,
   getAuditionGroups,
   getSlotAvailability,
+  getSignupNames,
   getActorSignup,
   getActorCallbacks,
   getActorCastAssignments,
@@ -125,6 +126,14 @@ export default function AuditionDetailPage() {
     enabled: !!show,
   });
 
+  // Attendee names ("First L.") — signed-in viewers only. Anonymous visitors
+  // never fetch names; they see fill counts only. Degrades to [] pre-013.
+  const { data: signupNames } = useQuery({
+    queryKey: ["signupNames", id],
+    queryFn: () => getSignupNames(id),
+    enabled: !!show && !!user,
+  });
+
   const { data: existingSignup } = useQuery({
     queryKey: ["actorSignup", id, user?.id],
     queryFn: () => getActorSignup(id, user?.id ?? ""),
@@ -182,6 +191,7 @@ export default function AuditionDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["actorSignup", id] });
       queryClient.invalidateQueries({ queryKey: ["slotAvailability", id] });
+      queryClient.invalidateQueries({ queryKey: ["signupNames", id] });
       toast("success", "You're signed up! Break a leg.");
       track("audition_signup", { showId: id });
       setShowModal(false);
@@ -196,6 +206,7 @@ export default function AuditionDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["actorSignup", id] });
       queryClient.invalidateQueries({ queryKey: ["slotAvailability", id] });
+      queryClient.invalidateQueries({ queryKey: ["signupNames", id] });
       toast("info", "Signup withdrawn.");
     },
   });
@@ -861,7 +872,12 @@ export default function AuditionDetailPage() {
         <>
           <EventInfoBlocks show={show} />
 
-          <AuditionScheduleByDay groups={groups} />
+          <AuditionScheduleByDay
+            groups={groups}
+            slotAvailability={slotAvailability}
+            signupNames={user ? signupNames : undefined}
+            isSignedIn={!!user}
+          />
 
           {show.auditionNotes && (
             <Card variant="sunken" className="mb-8">
@@ -1347,14 +1363,34 @@ function RolesList({ roles }: { roles: ShowRole[] | undefined }) {
    Audition schedule — blocks grouped under day headings
    ("Saturday, Sep 12"). Read-only public view of the day-based
    blocks; the signup modal handles actual slot selection.
+   Everyone sees per-block fill counts; SIGNED-IN viewers also
+   see who's auditioning as "First L." (never full names, never
+   profile links — that's the privacy line). Anonymous visitors
+   never see a person.
    ============================================================ */
 
 function AuditionScheduleByDay({
   groups,
+  slotAvailability,
+  signupNames,
+  isSignedIn,
 }: {
   groups: import("@/types").AuditionGroup[] | undefined;
+  slotAvailability: { groupId: string; taken: number }[] | undefined;
+  signupNames: { groupId: string; name: string }[] | undefined;
+  isSignedIn: boolean;
 }) {
   if (!groups || groups.length === 0) return null;
+
+  const takenMap = new Map<string, number>(
+    (slotAvailability ?? []).map((a) => [a.groupId, a.taken])
+  );
+  const namesMap = new Map<string, string[]>();
+  for (const n of signupNames ?? []) {
+    const arr = namesMap.get(n.groupId) ?? [];
+    arr.push(n.name);
+    namesMap.set(n.groupId, arr);
+  }
 
   const byDay = new Map<string, typeof groups>();
   for (const g of groups) {
@@ -1386,20 +1422,44 @@ function AuditionScheduleByDay({
             <p className="text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-2">
               {day.label}
             </p>
-            <div className="flex flex-wrap gap-1.5">
-              {day.blocks.map((block) => (
-                <span
-                  key={block.id}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-curtain-800 bg-white rounded-lg px-2.5 py-1 border border-cream-200"
-                >
-                  <Clock className="w-3.5 h-3.5 text-stage-500" weight="duotone" />
-                  {formatTime(block.startTime)}
-                </span>
-              ))}
+            <div className="flex flex-col">
+              {day.blocks.map((block) => {
+                const taken = takenMap.get(block.id) ?? 0;
+                const isFull = taken >= block.slotCount;
+                const names = namesMap.get(block.id) ?? [];
+                return (
+                  <div
+                    key={block.id}
+                    className="py-2 border-b border-cream-100 last:border-0 last:pb-0 first:pt-0"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="inline-flex items-center gap-1.5 text-sm font-medium text-curtain-800">
+                        <Clock className="w-4 h-4 text-stage-500" weight="duotone" />
+                        {formatTime(block.startTime)}
+                      </span>
+                      <span
+                        className={`text-xs font-medium ${isFull ? "text-ruby-500" : "text-clay-500"}`}
+                      >
+                        {taken} of {block.slotCount} filled{isFull ? " · Full" : ""}
+                      </span>
+                    </div>
+                    {names.length > 0 && (
+                      <p className="text-xs text-clay-500 mt-1 pl-[22px]">
+                        {names.join(" · ")}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </Card>
         ))}
       </div>
+      {!isSignedIn && (
+        <p className="text-[11px] text-clay-400 mt-2">
+          Sign in to see who&apos;s auditioning in each time slot.
+        </p>
+      )}
     </div>
   );
 }

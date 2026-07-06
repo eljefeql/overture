@@ -1,13 +1,3 @@
--- ╔══════════════════════════════════════════════════════════════════════╗
--- ║  PASTE_ME_NEXT — Migration 013 only (008–012 already applied)          ║
--- ╚══════════════════════════════════════════════════════════════════════╝
--- Paste this whole file once in Supabase Dashboard → SQL Editor → Run.
--- Then (optionally) paste supabase/QA_SEED.sql for the staging QA population.
-
--- ╔══════════════════════════════════════════════════════════════════════╗
--- ║  MIGRATION 013 — public audition page signup names                     ║
--- ╚══════════════════════════════════════════════════════════════════════╝
-
 -- ============================================================================
 -- Overture 2.0 — Migration 013: public audition page signup names
 -- ============================================================================
@@ -29,6 +19,7 @@
 -- S."); single-word names are returned as-is.
 --
 -- Idempotent — safe to paste more than once.
+-- Apply in: Supabase Dashboard → SQL Editor → paste → Run.
 -- NOTE: after applying, PROD_SETUP.sql should be regenerated to include this
 -- migration before the production project is set up.
 -- ============================================================================

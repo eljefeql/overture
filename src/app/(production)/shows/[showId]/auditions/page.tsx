@@ -45,6 +45,8 @@ import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { formatTime, formatHeight, formatDate } from "@/lib/utils";
 import {
   MagnifyingGlass,
+  ArrowSquareOut,
+  LinkSimple,
   CalendarX,
   CheckCircle,
   ClipboardText,
@@ -224,6 +226,22 @@ export default function AuditionsPage() {
 
   const { show, roles, groups, signups, callbacks: cbs } = data;
 
+  // Same public-page share affordances as the setup page — owners asked for
+  // a way to share the audition page from here too.
+  const publicAuditionUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/auditions/${showId}`
+      : `/auditions/${showId}`;
+
+  const copyPublicLink = async () => {
+    try {
+      await navigator.clipboard.writeText(publicAuditionUrl);
+      toast("success", "Public link copied to clipboard!");
+    } catch {
+      toast("error", "Couldn't copy — try again.");
+    }
+  };
+
   const roleMap: Record<string, string> =
     roles?.reduce((acc, r) => ({ ...acc, [r.id]: r.name }), {} as Record<string, string>) ?? {};
 
@@ -391,7 +409,26 @@ export default function AuditionsPage() {
             {show.auditionLocation && ` · ${show.auditionLocation}`}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {show.status !== "setup" && (
+            <>
+              <a href={`/auditions/${showId}`} target="_blank" rel="noopener noreferrer">
+                <Button
+                  variant="outline"
+                  icon={<ArrowSquareOut className="w-4 h-4 text-stage-500" weight="duotone" />}
+                >
+                  View public page
+                </Button>
+              </a>
+              <Button
+                variant="outline"
+                onClick={copyPublicLink}
+                icon={<LinkSimple className="w-4 h-4 text-stage-500" weight="duotone" />}
+              >
+                Copy link
+              </Button>
+            </>
+          )}
           <Link href={`/shows/${showId}/conflicts`}>
             <Button
               variant="outline"
