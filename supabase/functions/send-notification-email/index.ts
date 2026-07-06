@@ -64,7 +64,12 @@ const APP_URL = Deno.env.get("APP_URL") ?? "http://localhost:3001";
 
 function emailHtml(n: NotificationRecord): string {
   const link = n.link_url ? new URL(n.link_url, APP_URL).toString() : APP_URL;
-  return `
+  // Full document with an explicit UTF-8 charset — without it, mail clients
+  // guess the encoding and mangle emoji/accented characters (🎉 → üéâ).
+  return `<!DOCTYPE html>
+  <html lang="en">
+  <head><meta charset="utf-8"></head>
+  <body style="margin: 0;">
   <div style="font-family: Georgia, serif; max-width: 560px; margin: 0 auto; padding: 24px;">
     <h1 style="color: #3d2645; font-size: 22px; margin-bottom: 4px;">${n.title}</h1>
     ${n.show_title ? `<p style="color: #8a7968; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; margin-top: 0;">${n.show_title}</p>` : ""}
@@ -75,7 +80,9 @@ function emailHtml(n: NotificationRecord): string {
     <p style="color: #8a7968; font-size: 12px; margin-top: 28px;">
       You're receiving this because of activity on your Overture account.
     </p>
-  </div>`;
+  </div>
+  </body>
+  </html>`;
 }
 
 Deno.serve(async (req) => {
