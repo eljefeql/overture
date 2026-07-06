@@ -31,7 +31,11 @@ import {
 
 export function Nav() {
   const { user, logout } = useAuth();
-  const { org } = useOrg();
+  const { org, isLoading: orgLoading } = useOrg();
+  // Org members get a "My Theatre" entry; confirmed org-less users get a
+  // subtle "Start a theatre" path instead (never while still loading — no
+  // flash of the wrong entry).
+  const showStartTheatre = !!user && !orgLoading && !org;
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -211,6 +215,16 @@ export function Nav() {
                           {org.name}
                         </Link>
                       )}
+                      {showStartTheatre && (
+                        <Link
+                          href="/onboarding?path=maker"
+                          className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-800 hover:bg-cream-50 transition"
+                          onClick={() => setAvatarOpen(false)}
+                        >
+                          <Buildings className="w-4 h-4 text-stage-500" weight="duotone" />
+                          Start a theatre
+                        </Link>
+                      )}
                       <Link
                         href="/settings"
                         className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-800 hover:bg-cream-50 transition"
@@ -315,6 +329,15 @@ export function Nav() {
                     >
                       <Buildings className="w-5 h-5" weight="duotone" />
                       {org.name}
+                    </Link>
+                  )}
+                  {showStartTheatre && (
+                    <Link
+                      href="/onboarding?path=maker"
+                      className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-curtain-300 hover:text-white hover:bg-curtain-800 transition"
+                    >
+                      <Buildings className="w-5 h-5" weight="duotone" />
+                      Start a theatre
                     </Link>
                   )}
                   <Link

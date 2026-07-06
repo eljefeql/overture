@@ -56,6 +56,49 @@ export function formatTime(datetime: string): string {
   });
 }
 
+/**
+ * LOCAL calendar-date key ("YYYY-MM-DD") for a timestamp. Never use
+ * toISOString().slice(0,10) for day grouping — that's the UTC date, so an
+ * 8:00 PM ET block lands on the NEXT day and evening schedules split under
+ * duplicate day headers.
+ */
+export function localDateKey(datetime: string | Date): string {
+  const d = typeof datetime === "string" ? new Date(datetime) : datetime;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * Group audition blocks under LOCAL day headings ("Saturday, Sep 12"), days
+ * in chronological order, blocks within a day sorted by start time. Shared by
+ * the show setup schedule card and the public audition page (the signup modal
+ * groups via locale date strings, which is equivalent).
+ */
+export function groupBlocksByDay<T extends { startTime: string }>(
+  blocks: T[]
+): { dateKey: string; label: string; blocks: T[] }[] {
+  const byDay = new Map<string, T[]>();
+  for (const b of blocks) {
+    const dateKey = localDateKey(b.startTime);
+    const arr = byDay.get(dateKey) ?? [];
+    arr.push(b);
+    byDay.set(dateKey, arr);
+  }
+  return [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([dateKey, dayBlocks]) => ({
+      dateKey,
+      label: new Date(dayBlocks[0].startTime).toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "short",
+        day: "numeric",
+      }),
+      blocks: dayBlocks
+        .slice()
+        .sort((x, y) => x.startTime.localeCompare(y.startTime)),
+    }));
+}
+
 export function formatMeasurement(inches: number | null): string {
   if (!inches) return "—";
   return `${inches}"`;

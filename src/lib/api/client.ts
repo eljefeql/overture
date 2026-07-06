@@ -1095,7 +1095,9 @@ export async function getOrgMembers(orgId: string): Promise<OrgMember[]> {
       id: `${INVITE_ID_PREFIX}${r.id}`,
       orgId: r.org_id,
       userId: null,
-      name: r.email.split("@")[0],
+      // invited_name arrives with migration 014; pre-paste rows (and older
+      // invites) fall back to the email prefix as before.
+      name: r.invited_name || r.email.split("@")[0],
       email: r.email,
       role: r.role,
       status: "invited",
@@ -1148,16 +1150,27 @@ export async function inviteOrgMember(
     }
 
     const { data: authData } = await supabase.auth.getUser();
-    const { data: invite, error } = await supabase
+    const baseRow = {
+      org_id: orgId,
+      email,
+      role: data.role,
+      invited_by: authData.user?.id,
+    };
+    // Store the invitee's name so the pending row shows a real name instead
+    // of the email prefix (org_invites.invited_name, migration 014). Graceful
+    // pre-paste: a missing-column error retries without it.
+    let { data: invite, error } = await supabase
       .from("org_invites")
-      .insert({
-        org_id: orgId,
-        email,
-        role: data.role,
-        invited_by: authData.user?.id,
-      })
+      .insert({ ...baseRow, invited_name: data.name.trim() || null })
       .select("*")
       .single();
+    if (error && /invited_name/.test(error.message)) {
+      ({ data: invite, error } = await supabase
+        .from("org_invites")
+        .insert(baseRow)
+        .select("*")
+        .single());
+    }
     if (error) throw new Error(error.message);
 
     // Existing Overture user? Tell them in-app (best-effort; RPC in 006).

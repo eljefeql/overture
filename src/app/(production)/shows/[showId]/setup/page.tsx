@@ -40,7 +40,7 @@ import {
 } from "@/components/ui";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/features/auth/AuthContext";
-import { formatDate, formatTime, formatTeamRole } from "@/lib/utils";
+import { formatDate, formatTime, formatTeamRole, groupBlocksByDay } from "@/lib/utils";
 import {
   PencilSimple,
   Plus,
@@ -141,31 +141,6 @@ const TEAM_ROLES: { value: TeamRole; label: string }[] = [
   { value: "asst_stage_manager", label: "Asst. SM" },
   { value: "accompanist", label: "Accompanist" },
 ];
-
-/**
- * Group audition blocks under day headings ("Saturday, Sep 12"), days in
- * chronological order, blocks within a day sorted by start time.
- */
-function groupBlocksByDay<T extends { startTime: string }>(blocks: T[]) {
-  const byDay = new Map<string, T[]>();
-  for (const b of blocks) {
-    const dateKey = new Date(b.startTime).toISOString().slice(0, 10);
-    const arr = byDay.get(dateKey) ?? [];
-    arr.push(b);
-    byDay.set(dateKey, arr);
-  }
-  return [...byDay.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([dateKey, dayBlocks]) => ({
-      dateKey,
-      label: new Date(dayBlocks[0].startTime).toLocaleDateString("en-US", {
-        weekday: "long",
-        month: "short",
-        day: "numeric",
-      }),
-      blocks: dayBlocks.sort((x, y) => x.startTime.localeCompare(y.startTime)),
-    }));
-}
 
 export default function ShowSetupPage() {
   const { showId } = useParams<{ showId: string }>();
@@ -617,8 +592,12 @@ export default function ShowSetupPage() {
       return;
     }
     // Rebuild full timestamps anchored to the callback date (fallback: today).
+    // Construct the instant as LOCAL time, then serialize to UTC — a naked
+    // "YYYY-MM-DDTHH:MM:00" string gets read as UTC by timestamptz, which
+    // shifted a 6:30 PM entry to render as 2:30 PM.
     const dateAnchor = callbackForm.callbackDate || new Date().toISOString().slice(0, 10);
-    const toTimestamp = (hhmm: string) => (hhmm ? `${dateAnchor}T${hhmm}:00` : null);
+    const toTimestamp = (hhmm: string) =>
+      hhmm ? new Date(`${dateAnchor}T${hhmm}:00`).toISOString() : null;
     callbackMutation.mutate({
       callbackDate: callbackForm.callbackDate || null,
       callbackStartTime: toTimestamp(callbackForm.callbackStartTime),
@@ -833,7 +812,7 @@ export default function ShowSetupPage() {
                       className="flex items-center gap-2 hover:opacity-70 transition text-left"
                     >
                       <span className="text-sm font-semibold text-curtain-900">{role.name}</span>
-                      <Badge variant="default" size="sm">{role.roleType}</Badge>
+                      <Badge variant="default" size="sm">{role.roleType.replace("_", " ")}</Badge>
                       {role.gender && (
                         <span className="text-xs text-clay-400">{role.gender === "any" ? "any gender" : role.gender}</span>
                       )}

@@ -11,6 +11,7 @@ import {
   getSlotAvailability,
   getSignupNames,
   getActorSignup,
+  getShowAccess,
   getActorCallbacks,
   getActorCastAssignments,
   signUpForAudition,
@@ -31,7 +32,7 @@ import {
   DateBlock,
   SectionHeader,
 } from "@/components/ui";
-import { formatDate, formatTime, formatTeamRole } from "@/lib/utils";
+import { formatDate, formatTime, formatTeamRole, groupBlocksByDay } from "@/lib/utils";
 import {
   Calendar,
   MapPin,
@@ -132,6 +133,23 @@ export default function AuditionDetailPage() {
     queryKey: ["signupNames", id],
     queryFn: () => getSignupNames(id),
     enabled: !!show && !!user,
+  });
+
+  // Chris Rule (product invariant): someone who manages this show — team
+  // member or org owner/admin — can't audition for it. Same cached access
+  // check the PreviewBanner uses; silent-fails to false so the public page
+  // never breaks on it.
+  const { data: canManageShow } = useQuery({
+    queryKey: ["showAccess", id, user?.id],
+    staleTime: 5 * 60 * 1000,
+    enabled: !!user && !!show,
+    queryFn: async () => {
+      try {
+        return await getShowAccess(id, user!.id);
+      } catch {
+        return false;
+      }
+    },
   });
 
   const { data: existingSignup } = useQuery({
@@ -925,29 +943,43 @@ export default function AuditionDetailPage() {
         />
       )}
 
-      {/* Sticky CTA (pre-signup only) */}
+      {/* Sticky CTA (pre-signup only). The Chris Rule: team members and org
+          admins of this show see an honest inert state instead of the signup
+          flow — you can't audition for a show you help run. */}
       {phase === "browsing" && (
         <div className="sticky bottom-0 bg-cream-50/95 backdrop-blur-sm py-4 -mx-6 px-6 border-t border-cream-200">
-          {signupCount > 0 && (
-            <p className="flex items-center justify-center gap-1.5 text-xs text-clay-500 mb-2">
-              <UsersThree className="w-4 h-4 text-stage-500" weight="duotone" />
-              {signupCount} actor{signupCount !== 1 ? "s have" : " has"} signed up
-            </p>
+          {canManageShow ? (
+            <Card variant="flat" padding="compact">
+              <p className="flex items-center justify-center gap-2 text-sm text-curtain-800">
+                <UsersThree className="w-4 h-4 text-stage-500 flex-shrink-0" weight="duotone" />
+                You&apos;re on this show&apos;s production team, so signing up to
+                audition isn&apos;t available.
+              </p>
+            </Card>
+          ) : (
+            <>
+              {signupCount > 0 && (
+                <p className="flex items-center justify-center gap-1.5 text-xs text-clay-500 mb-2">
+                  <UsersThree className="w-4 h-4 text-stage-500" weight="duotone" />
+                  {signupCount} actor{signupCount !== 1 ? "s have" : " has"} signed up
+                </p>
+              )}
+              <Button
+                size="lg"
+                className="w-full"
+                onClick={() => {
+                  if (user) {
+                    setShowModal(true);
+                  } else {
+                    // Sign-up wall: through signup/onboarding, then back here
+                    router.push(`/signup?next=${encodeURIComponent(`/auditions/${id}`)}`);
+                  }
+                }}
+              >
+                Sign Up to Audition
+              </Button>
+            </>
           )}
-          <Button
-            size="lg"
-            className="w-full"
-            onClick={() => {
-              if (user) {
-                setShowModal(true);
-              } else {
-                // Sign-up wall: through signup/onboarding, then back here
-                router.push(`/signup?next=${encodeURIComponent(`/auditions/${id}`)}`);
-              }
-            }}
-          >
-            Sign Up to Audition
-          </Button>
         </div>
       )}
     </div>
@@ -1392,33 +1424,16 @@ function AuditionScheduleByDay({
     namesMap.set(n.groupId, arr);
   }
 
-  const byDay = new Map<string, typeof groups>();
-  for (const g of groups) {
-    const key = new Date(g.startTime).toISOString().slice(0, 10);
-    const arr = byDay.get(key) ?? [];
-    arr.push(g);
-    byDay.set(key, arr);
-  }
-  const days = [...byDay.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, blocks]) => ({
-      key,
-      label: new Date(blocks[0].startTime).toLocaleDateString("en-US", {
-        weekday: "long",
-        month: "short",
-        day: "numeric",
-      }),
-      blocks: blocks
-        .slice()
-        .sort((x, y) => x.startTime.localeCompare(y.startTime)),
-    }));
+  // Shared LOCAL-date grouping (src/lib/utils.ts) — grouping by the UTC date
+  // used to split evening blocks under a duplicated next-day header.
+  const days = groupBlocksByDay(groups);
 
   return (
     <div className="mb-8">
       <SectionHeader>Audition Times</SectionHeader>
       <div className="flex flex-col gap-4">
         {days.map((day) => (
-          <Card key={day.key} variant="flat" padding="compact">
+          <Card key={day.dateKey} variant="flat" padding="compact">
             <p className="text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-2">
               {day.label}
             </p>
