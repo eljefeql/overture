@@ -31,7 +31,7 @@ import {
 
 export function Nav() {
   const { user, logout } = useAuth();
-  const { org, isLoading: orgLoading } = useOrg();
+  const { org, memberships, selectOrg, isLoading: orgLoading } = useOrg();
   // Org members get a "My Theatre" entry; confirmed org-less users get a
   // subtle "Start a theatre" path instead (never while still loading — no
   // flash of the wrong entry).
@@ -205,16 +205,20 @@ export function Nav() {
                         <UserCircle className="w-4 h-4 text-stage-500" weight="duotone" />
                         My Profile
                       </Link>
-                      {org && (
+                      {memberships.map((m) => (
                         <Link
+                          key={m.org.id}
                           href="/org"
                           className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-800 hover:bg-cream-50 transition"
-                          onClick={() => setAvatarOpen(false)}
+                          onClick={() => {
+                            setAvatarOpen(false);
+                            if (m.org.id !== org?.id) selectOrg(m.org.id);
+                          }}
                         >
-                          <Buildings className="w-4 h-4 text-stage-500" weight="duotone" />
-                          {org.name}
+                          <Buildings className="w-4 h-4 text-stage-500 flex-shrink-0" weight="duotone" />
+                          <span className="truncate">{m.org.name}</span>
                         </Link>
-                      )}
+                      ))}
                       {showStartTheatre && (
                         <Link
                           href="/onboarding?path=maker"
@@ -322,15 +326,19 @@ export function Nav() {
                       </p>
                     </div>
                   </div>
-                  {org && (
+                  {memberships.map((m) => (
                     <Link
+                      key={m.org.id}
                       href="/org"
                       className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-curtain-300 hover:text-white hover:bg-curtain-800 transition"
+                      onClick={() => {
+                        if (m.org.id !== org?.id) selectOrg(m.org.id);
+                      }}
                     >
-                      <Buildings className="w-5 h-5" weight="duotone" />
-                      {org.name}
+                      <Buildings className="w-5 h-5 flex-shrink-0" weight="duotone" />
+                      <span className="truncate">{m.org.name}</span>
                     </Link>
-                  )}
+                  ))}
                   {showStartTheatre && (
                     <Link
                       href="/onboarding?path=maker"

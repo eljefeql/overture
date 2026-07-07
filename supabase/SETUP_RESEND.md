@@ -48,6 +48,14 @@ Optional (after you verify a domain in Resend):
 supabase secrets set RESEND_FROM="Overture <notifications@yourdomain.com>"
 ```
 
+**Staging QA note:** while you're testing against the staging project with
+the app running locally, email links (invites, cancel links, etc.) are built
+from `APP_URL` — so point it at your local dev server or the links will 404:
+```bash
+npx supabase secrets set APP_URL=http://localhost:3001
+```
+Switch it back to the real deployed URL before anyone outside QA gets email.
+
 ## 4. Deploy the function
 
 ```bash

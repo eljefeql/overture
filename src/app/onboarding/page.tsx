@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/features/auth/AuthContext";
 import { createActorProfile, createOrg } from "@/lib/api/client";
 import { completeActorOnboarding, completeMakerOnboarding } from "@/lib/api/onboarding";
+import { selectOrgForUser } from "@/features/auth/useOrg";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { track } from "@/lib/analytics";
 import {
@@ -183,13 +184,16 @@ function OnboardingWizard() {
       }
       return createOrg(org);
     },
-    onSuccess: () => {
+    onSuccess: (newOrg) => {
       updateUser({
         displayName: displayName.trim(),
         pronouns: (pronouns as Pronouns) || null,
         onboardingStep: "complete",
       });
-      // The freshly created org must be visible to useOrg before /shows/new.
+      // The freshly created theatre becomes the ACTIVE one (matters when the
+      // user already belonged to another theatre) …
+      if (user?.id && newOrg?.id) selectOrgForUser(user.id, newOrg.id);
+      // … and must be visible to useOrg before /shows/new.
       queryClient.invalidateQueries({ queryKey: ["myOrg"] });
       switchRole({ type: "team", showId: "show-1", teamRole });
       track("onboarding_completed", { path: "maker" });

@@ -384,30 +384,52 @@ function rowToTeamMember(r: any): ShowTeamMember {
 export type OrgMembershipInfo = { org: Org; role: OrgRole };
 
 /**
- * The user's theatre — first active org membership joined to its org.
+ * ALL of the user's theatres — every active org membership joined to its
+ * org, ordered by joined_at (oldest first, so the first theatre stays the
+ * default). Powers the theatre switcher; `useOrg` picks the selected one.
  * Mock mode resolves to org-1 (owner) so the demo personas keep working.
  */
-export async function getMyOrgMembership(
+export async function getMyOrgMemberships(
   userId: string
-): Promise<OrgMembershipInfo | null> {
+): Promise<OrgMembershipInfo[]> {
   if (isSupabaseConfigured) {
     const { data, error } = await getSupabase()
       .from("org_members")
       .select("role, joined_at, orgs(*)")
       .eq("user_id", userId)
-      .order("joined_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
+      .order("joined_at", { ascending: true });
     if (error) throw new Error(error.message);
-    if (!data?.orgs) return null;
-    return { org: rowToOrg(data.orgs), role: data.role as OrgRole };
+    return (data ?? [])
+      .filter((row) => row.orgs)
+      .map((row) => ({
+        org: rowToOrg(row.orgs),
+        role: row.role as OrgRole,
+      }));
   }
   await delay();
-  const membership = orgMembers.find(
+  const mine = orgMembers.filter(
     (m) => m.userId === userId && m.status === "active"
   );
-  const org = orgs.find((o) => o.id === (membership?.orgId ?? "org-1"));
-  return org ? { org, role: membership?.role ?? "owner" } : null;
+  if (mine.length === 0) {
+    // Mock personas without an explicit membership row demo as org-1 owner.
+    const org = orgs.find((o) => o.id === "org-1");
+    return org ? [{ org, role: "owner" as OrgRole }] : [];
+  }
+  return mine.flatMap((m) => {
+    const org = orgs.find((o) => o.id === m.orgId);
+    return org ? [{ org, role: m.role }] : [];
+  });
+}
+
+/**
+ * The user's first theatre — kept for compatibility; prefer
+ * `getMyOrgMemberships` (the switcher-aware plural) for anything new.
+ */
+export async function getMyOrgMembership(
+  userId: string
+): Promise<OrgMembershipInfo | null> {
+  const memberships = await getMyOrgMemberships(userId);
+  return memberships[0] ?? null;
 }
 
 /**

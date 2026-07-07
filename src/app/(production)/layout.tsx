@@ -36,7 +36,7 @@ export default function ProductionLayout({
 }) {
   const pathname = usePathname();
   const { user, activeRole, switchRole } = useAuth();
-  const { org, isLoading: orgLoading } = useOrg();
+  const { memberships, isLoading: orgLoading } = useOrg();
 
   // Auto-switch to team role when on production pages
   // Uses the actual showId from the URL (or falls back to "show-1")
@@ -99,7 +99,7 @@ export default function ProductionLayout({
           />
         </div>
       );
-    } else if (!showId && !org) {
+    } else if (!showId && memberships.length === 0) {
       content = (
         <div className="max-w-2xl mx-auto px-6 py-16">
           <EmptyState
