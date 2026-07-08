@@ -49,6 +49,15 @@ export function formatDate(date: string | null): string {
   });
 }
 
+/**
+ * Conflict text is stored with raw ISO dates ("2026-09-12 to 2026-09-13, …").
+ * Format each embedded date for humans at display time, so existing rows
+ * render nicely without a data migration.
+ */
+export function formatConflictText(text: string): string {
+  return text.replace(/\d{4}-\d{2}-\d{2}/g, (d) => formatDate(d));
+}
+
 export function formatTime(datetime: string): string {
   return new Date(datetime).toLocaleTimeString("en-US", {
     hour: "numeric",

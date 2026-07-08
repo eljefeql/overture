@@ -32,7 +32,7 @@ import {
   DateBlock,
   SectionHeader,
 } from "@/components/ui";
-import { formatDate, formatTime, formatTeamRole, groupBlocksByDay } from "@/lib/utils";
+import { formatDate, formatTime, formatTeamRole, formatConflictText, groupBlocksByDay } from "@/lib/utils";
 import {
   Calendar,
   MapPin,
@@ -831,7 +831,7 @@ export default function AuditionDetailPage() {
 
             {existingSignup!.conflicts && (
               <p className="text-xs text-stage-600 mb-3">
-                Conflicts noted: {existingSignup!.conflicts}
+                Conflicts noted: {formatConflictText(existingSignup!.conflicts)}
               </p>
             )}
 
@@ -1113,7 +1113,7 @@ function AuditionRecapCollapsible({
               )}
               {existingSignup.conflicts && (
                 <p className="text-xs text-stage-600 mt-1">
-                  Conflicts noted: {existingSignup.conflicts}
+                  Conflicts noted: {formatConflictText(existingSignup.conflicts)}
                 </p>
               )}
             </div>

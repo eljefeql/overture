@@ -42,7 +42,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useOrg } from "@/features/auth/useOrg";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
-import { formatTime, formatHeight, formatDate } from "@/lib/utils";
+import { formatTime, formatHeight, formatDate, formatConflictText } from "@/lib/utils";
 import {
   MagnifyingGlass,
   ArrowSquareOut,
@@ -829,7 +829,7 @@ export default function AuditionsPage() {
                     {panelSignup.conflicts && (
                       <div className="flex justify-between">
                         <span className="text-clay-500">Conflicts</span>
-                        <span className="text-curtain-800">{panelSignup.conflicts}</span>
+                        <span className="text-curtain-800">{formatConflictText(panelSignup.conflicts)}</span>
                       </div>
                     )}
                     {(() => {
