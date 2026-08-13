@@ -68,9 +68,16 @@ A theatre we've never met can: find Overture → sign up → set up their theatr
 
 ## Explicitly NOT in the 30 days (fast-follow, in priority order)
 1. **Stripe billing** + customer portal + entitlements (the moment beta → paid)
-2. **Geocoding / real distance search** (Maps API decision pending; "within X miles" is approximate until then) — *stretch into Week 4 if ahead*
-3. **Build B** — verified-collaborator theatre reviews, follow-a-theatre, thumbs-up
-4. Google OAuth · duplicate-theatre prevention/claiming · pre-loaded show DB (Concord/MTI) · per-show messaging · full actor↔theatre role-switcher
+2. **Audition & staff-call email digest** — weekly/daily "new auditions near you" email on the existing
+   Resend + cron + notification-prefs pipeline. YT411's stickiest feature; kills their last actor-side
+   advantage. See `TALENT_DISCOVERY_SPEC.md`. *(Added 2026-08-13 from the YT411 competitive audit.)*
+3. **Staff Calls (crew "help wanted")** — post open design/tech/music positions on a show, public + SEO'd,
+   signed-in "I'm interested" responses, verified crew credit when filled through Overture. New
+   `CreativeRole` taxonomy (design/tech/pit-musician categories the market recruits that our TeamRole enum
+   doesn't cover). See `TALENT_DISCOVERY_SPEC.md`. *(Added 2026-08-13.)*
+4. **Geocoding / real distance search** (Maps API decision pending; "within X miles" is approximate until then)
+5. **Build B** — verified-collaborator theatre reviews, follow-a-theatre, thumbs-up
+6. Google OAuth · duplicate-theatre prevention/claiming · pre-loaded show DB (Concord/MTI) · per-show messaging · full actor↔theatre role-switcher
 
 ---
 
