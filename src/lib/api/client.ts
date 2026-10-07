@@ -155,6 +155,8 @@ function rowToSignup(r: any): AuditionSignup {
     slotPosition: r.slot_position,
     rolesInterested: r.roles_interested ?? [],
     openToOther: r.open_to_other,
+    // Pre-migration-016 rows (and pre-paste cloud reads) have no column.
+    openToEnsemble: r.open_to_ensemble ?? false,
     willCrew: r.will_crew,
     conflicts: r.conflicts,
     status: r.status,
@@ -1791,6 +1793,8 @@ export async function signUpForAudition(signup: {
   groupId: string;
   rolesInterested: string[];
   openToOther: boolean;
+  /** Acknowledged at signup: happy to take an ensemble/smaller role in this show (migration 016). */
+  openToEnsemble: boolean;
   willCrew: boolean;
   conflicts: string;
   /** Structured conflict ranges — persisted to signup_conflicts (migration 009). */
@@ -1855,10 +1859,19 @@ export async function signUpForAudition(signup: {
       commitment_acknowledged: signup.commitmentAcknowledged,
     };
 
-    const query = existing
-      ? supabase.from("audition_signups").update(row).eq("id", existing.id)
-      : supabase.from("audition_signups").insert(row);
-    const { data, error } = await query.select(SIGNUP_SELECT).single();
+    // open_to_ensemble lands with migration 016 — graceful pre-paste: a
+    // missing-column error retries without it (same pattern as invited_name).
+    const buildQuery = (r: Record<string, unknown>) =>
+      existing
+        ? supabase.from("audition_signups").update(r).eq("id", existing.id)
+        : supabase.from("audition_signups").insert(r);
+    let { data, error } = await buildQuery({
+      ...row,
+      open_to_ensemble: signup.openToEnsemble,
+    }).select(SIGNUP_SELECT).single();
+    if (error && /open_to_ensemble/.test(error.message)) {
+      ({ data, error } = await buildQuery(row).select(SIGNUP_SELECT).single());
+    }
     if (error) throw new Error(error.message);
 
     // Structured conflict ranges → signup_conflicts (migration 009).
@@ -1928,6 +1941,7 @@ export async function signUpForAudition(signup: {
     slotPosition: takenInGroup + 1,
     rolesInterested: signup.rolesInterested,
     openToOther: signup.openToOther,
+    openToEnsemble: signup.openToEnsemble,
     willCrew: signup.willCrew,
     conflicts: signup.conflicts,
     conflictDates: signup.conflictDates,

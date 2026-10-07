@@ -480,6 +480,9 @@ function ShowJourneyCard({
               )}
               {(cb.prepNotes || show?.callbackNotes) && (
                 <div className="mt-2 p-2 bg-cream-50 rounded-lg">
+                  <p className="text-[10px] font-semibold text-curtain-700 tracking-wide uppercase mb-1">
+                    What to Prepare
+                  </p>
                   {cb.prepNotes && (
                     <p className="text-xs text-curtain-700 leading-relaxed flex items-start gap-1.5">
                       <NoteBlank className="w-3.5 h-3.5 text-stage-500 flex-shrink-0 mt-0.5" weight="duotone" />
@@ -575,6 +578,9 @@ function ShowJourneyCard({
               </div>
               {(acceptedCallbacks[0]?.prepNotes || show?.callbackNotes) && (
                 <div className="mt-2 p-2 bg-cream-50 rounded-lg">
+                  <p className="text-[10px] font-semibold text-curtain-700 tracking-wide uppercase mb-1">
+                    What to Prepare
+                  </p>
                   {acceptedCallbacks[0]?.prepNotes && (
                     <p className="text-xs text-curtain-700 leading-relaxed flex items-start gap-1.5">
                       <NoteBlank className="w-3.5 h-3.5 text-stage-500 flex-shrink-0 mt-0.5" weight="duotone" />

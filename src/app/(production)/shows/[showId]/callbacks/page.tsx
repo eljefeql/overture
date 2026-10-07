@@ -30,6 +30,7 @@ import {
   StatBlock,
   PageSkeleton,
   EmptyState,
+  Textarea,
 } from "@/components/ui";
 import { TeamNotesFeed } from "@/components/casting/TeamNotesFeed";
 import { useUIStore } from "@/stores/useUIStore";
@@ -40,10 +41,9 @@ import {
   PaperPlaneTilt,
   Plus,
   Warning,
-  Calendar,
-  UserCirclePlus,
   Users,
   CalendarX,
+  NoteBlank,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { CALLBACK_STATUS_LABELS, CALLBACK_STATUS_BADGE } from "@/lib/constants";
@@ -68,6 +68,9 @@ export default function CallbacksPage() {
   const [selectedActorForCallback, setSelectedActorForCallback] = useState<string | null>(null);
   const [notifyConfirmOpen, setNotifyConfirmOpen] = useState(false);
   const [advanceConfirmOpen, setAdvanceConfirmOpen] = useState(false);
+  // Shared callback instructions draft — null until the user starts typing,
+  // so the saved value (shows.callback_notes) stays the source of truth.
+  const [instructionsDraft, setInstructionsDraft] = useState<string | null>(null);
 
   // ── Data fetching ──
   const { data, isLoading, isError } = useQuery({
@@ -129,6 +132,21 @@ export default function CallbacksPage() {
       queryClient.invalidateQueries({ queryKey: ["shows"] });
       toast("success", "Moved to casting phase!");
       setAdvanceConfirmOpen(false);
+    },
+    onError: (err: Error) => toast("error", err.message),
+  });
+
+  // One shared instructions box for the whole callback session (owner
+  // decision, QA round 2) — saved on the show itself (callback_notes), so
+  // every actor with a callback sees the same "what to prepare" note.
+  const instructionsMutation = useMutation({
+    mutationFn: (value: string) =>
+      updateShow(showId, { callbackNotes: value.trim() || null }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["callbacks", showId] });
+      queryClient.invalidateQueries({ queryKey: ["show", showId] });
+      setInstructionsDraft(null);
+      toast("success", "Callback instructions saved — every called-back actor will see them.");
     },
     onError: (err: Error) => toast("error", err.message),
   });
@@ -281,6 +299,37 @@ export default function CallbacksPage() {
         <StatBlock label="Awaiting" value={String(awaiting)} />
         <StatBlock label="Declined" value={String(declined)} />
       </div>
+
+      {/* ── Shared callback instructions — written once for everyone ── */}
+      <Card variant="elevated" className="mb-6 animate-fade-up" style={{ animationDelay: "75ms" }}>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <NoteBlank className="w-5 h-5 text-stage-500" weight="duotone" />
+            <CardTitle>Callback Instructions</CardTitle>
+          </div>
+        </CardHeader>
+        <p className="text-xs text-clay-500 mb-3">
+          Write it once — every actor with a callback sees this on their audition
+          page and in My Shows. What to prepare, what to wear, where to park.
+        </p>
+        <Textarea
+          aria-label="Callback instructions for all actors"
+          rows={3}
+          placeholder="e.g. Sides will be emailed the night before. Wear shoes you can move in. Park in the lot behind the theatre."
+          value={instructionsDraft ?? show.callbackNotes ?? ""}
+          onChange={(e) => setInstructionsDraft(e.target.value)}
+        />
+        <div className="flex justify-end mt-3">
+          <Button
+            size="sm"
+            onClick={() => instructionsMutation.mutate(instructionsDraft ?? "")}
+            loading={instructionsMutation.isPending}
+            disabled={instructionsDraft === null || instructionsDraft === (show.callbackNotes ?? "")}
+          >
+            Save Instructions
+          </Button>
+        </div>
+      </Card>
 
       {/* ── Two-panel layout ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

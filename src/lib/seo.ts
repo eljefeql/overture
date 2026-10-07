@@ -70,6 +70,63 @@ export async function getOrgSeo(
   return rows?.[0] ?? null;
 }
 
+// ── Landing page reads ──────────────────────────────────────────────────
+
+export type OpenAuditionCard = {
+  id: string;
+  title: string;
+  showType: "musical" | "play" | "revue";
+  auditionStart: string | null; // 'YYYY-MM-DD'
+  city: string | null;
+  state: string | null;
+  orgName: string | null;
+};
+
+/**
+ * Up to 4 open-audition shows for the landing-page strip, soonest audition
+ * first. Same lean anon REST pattern as restFetch, plus a hard 3s timeout —
+ * the landing page must never hang on this. Mock mode or ANY failure → []
+ * (the section simply doesn't render).
+ */
+export async function getOpenAuditionCards(): Promise<OpenAuditionCard[]> {
+  if (!isConfigured) return [];
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/shows?status=eq.auditions_open&select=id,title,show_type,audition_start,city,state,orgs(name)&order=audition_start.asc.nullslast&limit=4`,
+      {
+        headers: {
+          apikey: SUPABASE_ANON_KEY!,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        signal: AbortSignal.timeout(3000),
+        next: { revalidate: 300 },
+      }
+    );
+    if (!res.ok) return [];
+    const rows = (await res.json()) as Array<{
+      id: string;
+      title: string;
+      show_type: "musical" | "play" | "revue";
+      audition_start: string | null;
+      city: string | null;
+      state: string | null;
+      orgs: { name: string } | null;
+    }>;
+    if (!Array.isArray(rows)) return [];
+    return rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      showType: r.show_type,
+      auditionStart: r.audition_start,
+      city: r.city,
+      state: r.state,
+      orgName: r.orgs?.name ?? null,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 // ── Sitemap reads ───────────────────────────────────────────────────────
 
 /** Shows with open auditions — the public audition pages worth indexing. */

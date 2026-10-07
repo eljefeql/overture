@@ -13,6 +13,7 @@ import {
   CheckSquare,
   Clock,
   Users,
+  UsersThree,
 } from "@phosphor-icons/react";
 import type { ShowRole, AuditionGroup } from "@/types";
 
@@ -36,6 +37,7 @@ export type SignupFormData = {
   groupId: string;
   rolesInterested: string[];
   openToOther: boolean;
+  openToEnsemble: boolean;
   willCrew: boolean;
   conflicts: ConflictDate[];
   isMember: boolean | null;
@@ -79,6 +81,7 @@ export function AuditionSignupModal({
   const [selectedGroup, setSelectedGroup] = useState<string>("");
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [openToOther, setOpenToOther] = useState(false);
+  const [openToEnsemble, setOpenToEnsemble] = useState(false);
   const [willCrew, setWillCrew] = useState(false);
   const [conflicts, setConflicts] = useState<ConflictDate[]>([]);
   const [isMember, setIsMember] = useState<boolean | null>(null);
@@ -108,6 +111,7 @@ export function AuditionSignupModal({
       groupId: selectedGroup,
       rolesInterested: selectedRoles,
       openToOther,
+      openToEnsemble,
       willCrew,
       conflicts,
       isMember,
@@ -246,6 +250,13 @@ export function AuditionSignupModal({
             icon={<HandWaving className="w-3.5 h-3.5 text-curtain-900" weight="bold" />}
             label="Open to other roles"
             description="Consider me for any role, not just the ones I selected"
+          />
+          <Checkbox
+            checked={openToEnsemble}
+            onChange={setOpenToEnsemble}
+            icon={<UsersThree className="w-3.5 h-3.5 text-curtain-900" weight="bold" />}
+            label="I'd happily accept an ensemble or smaller role in this show"
+            description="No pressure either way — this just helps the team know you'd love to be part of this one, even offstage-center"
           />
           <Checkbox
             checked={willCrew}

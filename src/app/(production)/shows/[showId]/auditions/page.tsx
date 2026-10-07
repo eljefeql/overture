@@ -96,7 +96,6 @@ export default function AuditionsPage() {
   const [callbackTarget, setCallbackTarget] = useState<AuditionSignup | null>(null);
   const [callbackRoleIds, setCallbackRoleIds] = useState<Set<string>>(new Set());
   const [advanceConfirmOpen, setAdvanceConfirmOpen] = useState(false);
-  const [callbackPrepNotes, setCallbackPrepNotes] = useState("");
   const [roleTrackerOpen, setRoleTrackerOpen] = useState(true);
 
   // ── Data fetching ──
@@ -337,7 +336,6 @@ export default function AuditionsPage() {
       ...signup.rolesInterested,
     ]);
     setCallbackRoleIds(suggested);
-    setCallbackPrepNotes("");
     setCallbackModalOpen(true);
   };
 
@@ -375,7 +373,6 @@ export default function AuditionsPage() {
           actorName: callbackTarget.actorName,
           roleId,
           roleName: role.name,
-          prepNotes: callbackPrepNotes.trim() || undefined,
         });
         added++;
       } catch {
@@ -819,19 +816,15 @@ export default function AuditionsPage() {
                 );
               })}
             </div>
-            {/* Prep notes for the actor */}
-            <div className="mb-4">
-              <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
-                Prep Notes <span className="font-normal text-clay-400">(optional)</span>
-              </label>
-              <textarea
-                value={callbackPrepNotes}
-                onChange={(e) => setCallbackPrepNotes(e.target.value)}
-                rows={2}
-                placeholder="e.g. Prepare 16 bars of an uptempo song, bring sides for Act 2"
-                className="w-full mt-1 px-3 py-2 text-sm rounded-xl border border-cream-200 bg-white focus:outline-none focus:ring-2 focus:ring-stage-300 text-curtain-900 placeholder:text-clay-400 resize-none"
-              />
-            </div>
+            {/* Per-person prep notes removed (owner QA, 2026-10-06): instructions are
+                written once in the shared Callback Instructions box on the Callbacks page. */}
+            <p className="mb-4 text-xs text-clay-500">
+              What should they prepare? Write it once in{" "}
+              <Link href={`/shows/${showId}/callbacks`} className="text-curtain-700 underline underline-offset-2">
+                Callback Instructions
+              </Link>{" "}
+              — every called-back actor sees it.
+            </p>
 
             <div className="flex justify-end gap-3">
               <Button variant="ghost" onClick={() => setCallbackModalOpen(false)}>
@@ -916,6 +909,12 @@ export default function AuditionsPage() {
                     {panelSignup.willCrew && (
                       <div className="flex justify-between">
                         <span className="text-clay-500">Will Crew</span>
+                        <span className="text-forest-600 font-medium">Yes</span>
+                      </div>
+                    )}
+                    {panelSignup.openToEnsemble && (
+                      <div className="flex justify-between">
+                        <span className="text-clay-500">Open to Ensemble</span>
                         <span className="text-forest-600 font-medium">Yes</span>
                       </div>
                     )}

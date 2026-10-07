@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Button } from "@/components/ui";
+import { OpenAuditionsSection } from "@/components/landing/OpenAuditionsSection";
 import {
   IdentificationCard,
   MapPin,
@@ -143,6 +144,11 @@ export default function LandingPage() {
           Or browse open auditions first
         </Link>
       </section>
+
+      {/* Open auditions strip — renders ONLY with 3+ real open auditions;
+          hidden entirely in mock mode, pre-supply, or on any fetch failure.
+          Never shows a count. */}
+      <OpenAuditionsSection />
 
       {/* How it works */}
       <section className="bg-cream-50 text-curtain-900 py-16 md:py-20">

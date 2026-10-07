@@ -1,9 +1,3 @@
--- ╔══════════════════════════════════════════════════════════════════════╗
--- ║  PASTE_ME_NEXT — Migration 016 only                                    ║
--- ╚══════════════════════════════════════════════════════════════════════╝
--- Paste this whole file once in Supabase Dashboard → SQL Editor → Run.
--- (Migrations 001–015 are already applied on staging as of 2026-07-06.)
-
 -- ============================================================================
 -- Overture 2.0 — Migration 016: ensemble willingness at signup
 --                               (+ callback-instructions note, no DDL needed)

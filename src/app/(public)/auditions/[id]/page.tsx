@@ -188,6 +188,7 @@ export default function AuditionDetailPage() {
         groupId: data.groupId,
         rolesInterested: data.rolesInterested,
         openToOther: data.openToOther,
+        openToEnsemble: data.openToEnsemble,
         willCrew: data.willCrew,
         conflicts: data.conflicts
           .map((c) =>
@@ -793,6 +794,7 @@ export default function AuditionDetailPage() {
                     .map((rid) => roleMap[rid] ?? "Role")
                     .join(", ")}
                   {existingSignup!.openToOther && " + open to other roles"}
+                  {existingSignup!.openToEnsemble && " + happy to join the ensemble"}
                 </p>
               </div>
             </div>
@@ -1088,6 +1090,7 @@ function AuditionRecapCollapsible({
                   .map((rid) => roleMap[rid] ?? "Role")
                   .join(", ")}
                 {existingSignup.openToOther && " + open to other roles"}
+                {existingSignup.openToEnsemble && " + happy to join the ensemble"}
               </p>
               {signedUpGroup && (
                 <>

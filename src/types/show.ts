@@ -178,6 +178,10 @@ export type AuditionSignup = {
   slotPosition: number | null;
   rolesInterested: ID[];
   openToOther: boolean;
+  /** Acknowledged at signup: happy to accept an ensemble/smaller role in THIS
+   *  show (per-show, never a profile-level flag — owner decision, QA round 2).
+   *  Optional so legacy mock rows default to false. */
+  openToEnsemble?: boolean;
   willCrew: boolean;
   conflicts: string | null;
   /** Structured conflict ranges (mock-mode storage; cloud rows live in signup_conflicts). */

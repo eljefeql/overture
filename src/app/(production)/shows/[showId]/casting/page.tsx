@@ -95,8 +95,10 @@ type RoleCandidate = {
   /** Names of OTHER roles this person was called back for (accepted). */
   otherCallbackRoles: string[];
   shortlisted: boolean;
-  /** Signed up "open to any role" — the ensemble-willingness flag. */
+  /** Signed up "open to any role". */
   openToOther: boolean;
+  /** Acknowledged at signup: happy to take an ensemble/smaller role in this show. */
+  openToEnsemble: boolean;
 };
 
 export default function CastingBoardPage() {
@@ -329,6 +331,7 @@ export default function CastingBoardPage() {
           otherCallbackRoles: [],
           shortlisted: false,
           openToOther: false,
+          openToEnsemble: false,
         };
         byActor.set(actorId, c);
       }
@@ -339,6 +342,7 @@ export default function CastingBoardPage() {
       const c = upsert(s.actorId, s.actorName);
       c.shortlisted = s.status === "shortlisted";
       c.openToOther = s.openToOther;
+      c.openToEnsemble = s.openToEnsemble ?? false;
     }
     for (const cb of acceptedCallbacks) {
       if (assignedSet.has(cb.actorId)) continue;
@@ -835,6 +839,9 @@ export default function CastingBoardPage() {
                           )}
                           {c.openToOther && (
                             <Badge variant="muted" size="sm">Open to any role</Badge>
+                          )}
+                          {c.openToEnsemble && (
+                            <Badge variant="gold" size="sm">Open to ensemble</Badge>
                           )}
                         </div>
                         {days > 0 && (
