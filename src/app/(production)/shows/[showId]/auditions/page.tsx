@@ -615,7 +615,14 @@ export default function AuditionsPage() {
               <Card key={group.id} variant="elevated">
                 <CardHeader>
                   <div className="flex items-center gap-3">
-                    <CardTitle>{group.name}</CardTitle>
+                    {/* Generator-named blocks ("6:30 PM") are frozen strings from the
+                        creator's timezone — show the live-formatted start time instead
+                        so the title always agrees with the range. Custom names stay. */}
+                    <CardTitle>
+                      {/^\d{1,2}:\d{2}\s?(AM|PM)$/i.test(group.name.trim())
+                        ? formatTime(group.startTime)
+                        : group.name}
+                    </CardTitle>
                     <span className="text-xs text-stage-600 font-medium">
                       {formatTime(group.startTime)} &ndash; {formatTime(group.endTime)}
                     </span>
