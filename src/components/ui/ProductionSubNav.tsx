@@ -36,6 +36,7 @@ const TAB_PHASE: Record<string, number> = {
   conflicts: 1, // conflict data exists as soon as signups do
   callbacks: 2,
   casting: 3,
+  offers: 3, // offers exist as soon as casting begins
   "cast-list": 4,
   hub: 4, // the hub comes alive once the cast is published
 };
@@ -50,6 +51,7 @@ export function ProductionSubNav({ showId, showStatus = "setup" }: Props) {
     { href: `/shows/${showId}/conflicts`, label: "Conflicts", segment: "conflicts" },
     { href: `/shows/${showId}/callbacks`, label: "Callbacks", segment: "callbacks" },
     { href: `/shows/${showId}/casting`, label: "Casting", segment: "casting" },
+    { href: `/shows/${showId}/offers`, label: "Offers", segment: "offers" },
     { href: `/shows/${showId}/cast-list`, label: "Cast List", segment: "cast-list" },
     { href: `/shows/${showId}/hub`, label: "Hub", segment: "hub" },
   ];

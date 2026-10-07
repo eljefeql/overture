@@ -21,6 +21,7 @@ import {
   updateTeamNote,
   deleteTeamNote,
 } from "@/lib/api/client";
+import { getResumeSignedUrl } from "@/lib/api/photos";
 import {
   Card,
   CardHeader,
@@ -54,6 +55,8 @@ import {
   ArrowBendUpRight,
   UserMinus,
   Users,
+  UsersThree,
+  CaretDown,
   Warning,
   X,
 } from "@phosphor-icons/react";
@@ -94,6 +97,7 @@ export default function AuditionsPage() {
   const [callbackRoleIds, setCallbackRoleIds] = useState<Set<string>>(new Set());
   const [advanceConfirmOpen, setAdvanceConfirmOpen] = useState(false);
   const [callbackPrepNotes, setCallbackPrepNotes] = useState("");
+  const [roleTrackerOpen, setRoleTrackerOpen] = useState(true);
 
   // ── Data fetching ──
   const { data, isLoading, isError } = useQuery({
@@ -252,8 +256,23 @@ export default function AuditionsPage() {
   const shortlisted = signups.filter((s) => s.status === "shortlisted").length;
   const callbackCount = signups.filter((s) => s.status === "callback").length;
 
+  // Stable board order (owner QA 2026-07-07): cards keep their slot-position /
+  // signup order no matter how status changes — advancing someone (check in →
+  // auditioned → shortlist) must only update the badge, never move the card.
+  // Cloud reads come back in arbitrary (update-recency) order, so sort
+  // deterministically here.
+  const orderedSignups = [...signups].sort((a, b) => {
+    const pa = a.slotPosition ?? Number.MAX_SAFE_INTEGER;
+    const pb = b.slotPosition ?? Number.MAX_SAFE_INTEGER;
+    if (pa !== pb) return pa - pb;
+    const ta = new Date(a.signedUpAt).getTime();
+    const tb = new Date(b.signedUpAt).getTime();
+    if (ta !== tb) return ta - tb;
+    return a.id.localeCompare(b.id);
+  });
+
   // Filter + search signups
-  const filteredSignups = signups.filter((s) => {
+  const filteredSignups = orderedSignups.filter((s) => {
     if (statusFilter !== "all" && s.status !== statusFilter) return false;
     if (search && !s.actorName.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
@@ -465,6 +484,68 @@ export default function AuditionsPage() {
         <StatBlock label="Shortlisted" value={String(shortlisted)} />
         <StatBlock label="Callbacks" value={String(callbackCount)} />
       </div>
+
+      {/* ── Role Tracker (owner QA 2026-07-07) — per-role shortlist/callback
+             tallies so directors don't lose track mid-audition ── */}
+      {roles && roles.length > 0 && (
+        <div className="mb-6 animate-fade-up" style={{ animationDelay: "75ms" }}>
+          <Card variant="elevated" padding="compact">
+            <button
+              onClick={() => setRoleTrackerOpen(!roleTrackerOpen)}
+              aria-expanded={roleTrackerOpen}
+              className="w-full flex items-center justify-between gap-2 px-1 py-0.5"
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <UsersThree className="w-4 h-4 text-stage-500 flex-shrink-0" weight="duotone" />
+                <span className="text-xs font-semibold text-curtain-700 tracking-wide uppercase">
+                  Role Tracker
+                </span>
+                <span className="text-xs text-clay-400 truncate hidden sm:inline">
+                  Shortlisted &amp; called back, per role
+                </span>
+              </span>
+              <CaretDown
+                className={`w-3.5 h-3.5 text-clay-400 flex-shrink-0 transition-transform ${roleTrackerOpen ? "rotate-180" : ""}`}
+                weight="bold"
+              />
+            </button>
+            {roleTrackerOpen && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-2">
+                {roles.map((role) => {
+                  const shortCount = signups.filter(
+                    (s) => s.status === "shortlisted" && s.rolesInterested.includes(role.id)
+                  ).length;
+                  const cbCount = cbs.filter((c) => c.roleId === role.id).length;
+                  return (
+                    <div
+                      key={role.id}
+                      className="flex items-center justify-between gap-2 bg-cream-50 border border-cream-200 rounded-xl px-3 py-2"
+                    >
+                      <span className="text-sm font-semibold text-curtain-900 truncate">
+                        {role.name}
+                      </span>
+                      <span className="flex items-center gap-2 flex-shrink-0 text-[11px] font-medium">
+                        <span
+                          className={`flex items-center gap-1 ${shortCount > 0 ? "text-stage-700" : "text-clay-400"}`}
+                        >
+                          <Star className="w-3.5 h-3.5 text-stage-500" weight="duotone" />
+                          {shortCount} shortlisted
+                        </span>
+                        <span
+                          className={`flex items-center gap-1 ${cbCount > 0 ? "text-curtain-800" : "text-clay-400"}`}
+                        >
+                          <ArrowBendUpRight className="w-3.5 h-3.5 text-stage-500" weight="duotone" />
+                          {cbCount} called back
+                        </span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
 
       {/* ── Toolbar ── */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6 animate-fade-up" style={{ animationDelay: "100ms" }}>
@@ -781,9 +862,14 @@ export default function AuditionsPage() {
                 size="xl"
               />
               <div>
-                <h2 className="text-xl font-display text-curtain-900">
-                  {selectedActor.displayName}
-                </h2>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-xl font-display text-curtain-900">
+                    {selectedActor.displayName}
+                  </h2>
+                  {selectedActor.profile?.isMinor && (
+                    <Badge variant="warning" size="sm">Minor</Badge>
+                  )}
+                </div>
                 {selectedActor.pronouns && (
                   <p className="text-sm text-clay-500">{selectedActor.pronouns}</p>
                 )}
@@ -826,27 +912,29 @@ export default function AuditionsPage() {
                         <span className="text-forest-600 font-medium">Yes</span>
                       </div>
                     )}
-                    {panelSignup.conflicts && (
-                      <div className="flex justify-between">
-                        <span className="text-clay-500">Conflicts</span>
-                        <span className="text-curtain-800">{formatConflictText(panelSignup.conflicts)}</span>
-                      </div>
-                    )}
                     {(() => {
+                      // One Conflicts row: structured date chips when we have
+                      // them, otherwise the free-text fallback.
                       const ranges =
                         showConflicts?.find((c) => c.signupId === panelSignup.id)
                           ?.ranges ?? [];
-                      if (ranges.length === 0) return null;
+                      if (ranges.length === 0 && !panelSignup.conflicts) return null;
                       return (
                         <div className="flex justify-between items-start">
-                          <span className="text-clay-500">Conflict Dates</span>
-                          <div className="flex gap-1 flex-wrap justify-end">
-                            {ranges.map((r, i) => (
-                              <Pill key={i} variant="status">
-                                {formatConflictRange(r.startDate, r.endDate)}
-                              </Pill>
-                            ))}
-                          </div>
+                          <span className="text-clay-500">Conflicts</span>
+                          {ranges.length > 0 ? (
+                            <div className="flex gap-1 flex-wrap justify-end">
+                              {ranges.map((r, i) => (
+                                <Pill key={i} variant="status">
+                                  {formatConflictRange(r.startDate, r.endDate)}
+                                </Pill>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-curtain-800 text-right">
+                              {formatConflictText(panelSignup.conflicts ?? "")}
+                            </span>
+                          )}
                         </div>
                       );
                     })()}
@@ -946,8 +1034,16 @@ export default function AuditionsPage() {
               <h4 className="text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-3">
                 Vitals
               </h4>
-              {selectedActor.profile && (selectedActor.profile.heightInches || selectedActor.profile.vocalRange || selectedActor.profile.danceStyles.length > 0) ? (
+              {selectedActor.profile && (selectedActor.profile.ageRangeLow || selectedActor.profile.heightInches || selectedActor.profile.vocalRange || selectedActor.profile.danceStyles.length > 0) ? (
                 <div className="grid grid-cols-3 gap-3">
+                  {(selectedActor.profile.ageRangeLow || selectedActor.profile.ageRangeHigh) && (
+                    <Card variant="flat" padding="compact" className="text-center">
+                      <p className="text-[10px] text-clay-400 uppercase tracking-wide">Plays Age</p>
+                      <p className="text-sm font-semibold">
+                        {selectedActor.profile.ageRangeLow ?? "?"}–{selectedActor.profile.ageRangeHigh ?? "?"}
+                      </p>
+                    </Card>
+                  )}
                   {selectedActor.profile.heightInches && (
                     <Card variant="flat" padding="compact" className="text-center">
                       <p className="text-[10px] text-clay-400 uppercase tracking-wide">Height</p>
@@ -973,11 +1069,30 @@ export default function AuditionsPage() {
             </div>
 
             {/* Production history */}
-            {selectedActor.credits.length > 0 && (
+            {(selectedActor.credits.length > 0 || selectedActor.profile?.resumePdfUrl) && (
               <div className="animate-fade-up" style={{ animationDelay: "300ms" }}>
-                <h4 className="text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-3">
-                  Production History
-                </h4>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-xs font-semibold text-curtain-700 tracking-wide uppercase">
+                    Production History
+                  </h4>
+                  {selectedActor.profile?.resumePdfUrl && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const url = await getResumeSignedUrl(selectedActor.profile!.resumePdfUrl!);
+                          window.open(url, "_blank", "noopener,noreferrer");
+                        } catch {
+                          toast("error", "Couldn't open the resume — try again.");
+                        }
+                      }}
+                      className="flex items-center gap-1 text-xs font-medium text-curtain-700 hover:text-curtain-900"
+                    >
+                      <ArrowSquareOut className="w-3.5 h-3.5 text-stage-500" weight="duotone" />
+                      View resume
+                    </button>
+                  )}
+                </div>
                 <div className="flex flex-col gap-0">
                   {selectedActor.credits.map((credit) => (
                     <div key={credit.id} className="flex items-center justify-between text-sm py-2 border-b border-cream-100 last:border-0">

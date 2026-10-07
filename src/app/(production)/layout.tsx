@@ -51,7 +51,7 @@ export default function ProductionLayout({
   }, [activeRole, switchRole, pathname]);
 
   // Extract showId from URL: /shows/[showId]/...
-  const showIdMatch = pathname?.match(/\/shows\/([^/]+)\/(setup|auditions|callbacks|casting|cast-list|conflicts|hub)/);
+  const showIdMatch = pathname?.match(/\/shows\/([^/]+)\/(setup|auditions|callbacks|casting|offers|cast-list|conflicts|hub)/);
   const showId = showIdMatch?.[1] ?? null;
   // The hub is open to the whole production (accepted cast included),
   // not just the team — it uses the broader production-member check.

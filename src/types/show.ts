@@ -237,6 +237,9 @@ export type CastAssignment = {
   assignmentType: AssignmentType;
   status: OfferStatus;
   sortOrder: number;
+  /** Cloud rows carry timestamps (offer tracker); mock rows may not. */
+  createdAt?: string | null;
+  updatedAt?: string | null;
 };
 
 /* ============================================================

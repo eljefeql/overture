@@ -57,7 +57,7 @@ export function Lightbox({ photos, index, onClose, onIndexChange }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-curtain-900/90 animate-fade-up"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-curtain-900/90 animate-fade-up"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

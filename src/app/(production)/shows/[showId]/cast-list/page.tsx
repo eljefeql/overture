@@ -346,11 +346,13 @@ export default function CastListPage() {
 
           return (
             <div key={role.id} className="py-4 border-b border-cream-100 last:border-0">
-              {sorted.map((assignment) => (
+              {sorted.map((assignment, idx) => (
                 <div key={assignment.id} className="flex items-center justify-between py-1.5">
                   <div className="flex items-center gap-3">
+                    {/* Role name once per role — ensemble pots list many people
+                        under a single heading instead of repeating it. */}
                     <span className="text-base font-display text-curtain-900 w-40">
-                      {assignment.assignmentType === "primary" ? role.name : ""}
+                      {idx === 0 && assignment.assignmentType === "primary" ? role.name : ""}
                     </span>
                     <button
                       type="button"

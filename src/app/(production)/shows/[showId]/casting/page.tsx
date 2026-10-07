@@ -38,6 +38,7 @@ import {
   StatBlock,
   PageSkeleton,
   EmptyState,
+  Input,
 } from "@/components/ui";
 import { TeamNotesFeed } from "@/components/casting/TeamNotesFeed";
 import { useUIStore } from "@/stores/useUIStore";
@@ -47,7 +48,6 @@ import { formatHeight } from "@/lib/utils";
 import {
   Users,
   Warning,
-  Plus,
   Trash,
   Megaphone,
   UserCirclePlus,
@@ -55,9 +55,15 @@ import {
   Eye,
   CalendarX,
   Info,
+  MagnifyingGlass,
+  CaretDown,
+  CaretUp,
+  Scales,
+  ArrowRight,
+  UsersThree,
 } from "@phosphor-icons/react";
 import Link from "next/link";
-import type { ShowRole, Callback, CastAssignment, AssignmentType } from "@/types";
+import type { CastAssignment, AssignmentType, RoleType } from "@/types";
 
 /* ============================================================
    Casting Board — Role-based assignment list
@@ -74,6 +80,23 @@ const ASSIGNMENT_BADGE: Record<AssignmentType, string> = {
   primary: "success",
   alternate: "warning",
   understudy: "default",
+};
+
+/** Ensemble-type roles are a "pot" — they hold many people at once. */
+const isEnsembleRoleType = (t: RoleType) =>
+  t === "ensemble" || t === "featured_ensemble";
+
+/** One person the assign modal can offer for a role, with their context. */
+type RoleCandidate = {
+  actorId: string;
+  actorName: string;
+  /** Accepted callback FOR THIS ROLE. */
+  calledBackForRole: boolean;
+  /** Names of OTHER roles this person was called back for (accepted). */
+  otherCallbackRoles: string[];
+  shortlisted: boolean;
+  /** Signed up "open to any role" — the ensemble-willingness flag. */
+  openToOther: boolean;
 };
 
 export default function CastingBoardPage() {
@@ -99,6 +122,10 @@ export default function CastingBoardPage() {
   const [poolFilter, setPoolFilter] = useState<"all" | "none" | "few">("all");
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
+
+  // ── Assign-modal redesign (QA finding 11): search + full-pool expander ──
+  const [candidateSearch, setCandidateSearch] = useState("");
+  const [showEveryone, setShowEveryone] = useState(false);
 
   // ── Data fetching ──
   const { data, isLoading, isError } = useQuery({
@@ -172,17 +199,20 @@ export default function CastingBoardPage() {
 
   // ── Mutations ──
   const assignMutation = useMutation({
-    mutationFn: (params: { roleId: string; roleName: string; actorId: string; actorName: string; assignmentType: AssignmentType }) =>
-      createCastAssignment({
-        showId,
-        roleId: params.roleId,
-        roleName: params.roleName,
-        actorId: params.actorId,
-        actorName: params.actorName,
-        assignmentType: params.assignmentType,
-        status: "draft",
-        sortOrder: 0,
-      }),
+    mutationFn: (params: { roleId: string; roleName: string; actorId: string; actorName: string; assignmentType: AssignmentType; allowMultiple?: boolean }) =>
+      createCastAssignment(
+        {
+          showId,
+          roleId: params.roleId,
+          roleName: params.roleName,
+          actorId: params.actorId,
+          actorName: params.actorName,
+          assignmentType: params.assignmentType,
+          status: "draft",
+          sortOrder: 0,
+        },
+        { allowMultiple: params.allowMultiple }
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["casting", showId] });
       toast("success", "Actor assigned!");
@@ -193,6 +223,8 @@ export default function CastingBoardPage() {
       setCompareOpen(false);
       setCompareIds([]);
       setPoolFilter("all");
+      setCandidateSearch("");
+      setShowEveryone(false);
     },
     onError: (err: Error) => toast("error", err.message),
   });
@@ -229,7 +261,7 @@ export default function CastingBoardPage() {
       queryClient.invalidateQueries({ queryKey: ["casting", showId] });
       queryClient.invalidateQueries({ queryKey: ["show", showId] });
       queryClient.invalidateQueries({ queryKey: ["shows"] });
-      toast("success", `${count} offer${count !== 1 ? "s" : ""} sent! Waiting for actor responses.`);
+      toast("success", `${count} offer${count !== 1 ? "s" : ""} sent! Track responses on the Offers tab.`);
       setSendOffersConfirmOpen(false);
     },
     onError: (err: Error) => toast("error", err.message),
@@ -279,29 +311,50 @@ export default function CastingBoardPage() {
   const getAssignmentsForRole = (roleId: string) =>
     activeAssignments.filter((a) => a.roleId === roleId);
 
-  // Get callback-accepted candidates for a role (not already assigned)
-  const getCallbackCandidates = (roleId: string) => {
-    const assigned = activeAssignments
-      .filter((a) => a.roleId === roleId)
-      .map((a) => a.actorId);
-    const assignedSet = new Set(assigned);
-    return acceptedCallbacks.filter(
-      (c) => c.roleId === roleId && !assignedSet.has(c.actorId)
+  // Build the full candidate pool for a role (QA finding 11): everyone who
+  // auditioned (plus anyone with an accepted callback), minus people already
+  // assigned to THIS role, each annotated with callback/shortlist context.
+  const getRoleCandidates = (roleId: string): RoleCandidate[] => {
+    const assignedSet = new Set(
+      activeAssignments.filter((a) => a.roleId === roleId).map((a) => a.actorId)
     );
-  };
-
-  // Get all-auditioned candidates for a role (not in callback pool, not already assigned)
-  const getAllAuditionedCandidates = (roleId: string) => {
-    const assigned = activeAssignments
-      .filter((a) => a.roleId === roleId)
-      .map((a) => a.actorId);
-    const callbackActorIds = new Set(
-      acceptedCallbacks.filter((c) => c.roleId === roleId).map((c) => c.actorId)
-    );
-    const assignedSet = new Set(assigned);
-    return allAuditionedSignups.filter(
-      (s) => !assignedSet.has(s.actorId) && !callbackActorIds.has(s.actorId)
-    );
+    const byActor = new Map<string, RoleCandidate>();
+    const upsert = (actorId: string, actorName: string): RoleCandidate => {
+      let c = byActor.get(actorId);
+      if (!c) {
+        c = {
+          actorId,
+          actorName,
+          calledBackForRole: false,
+          otherCallbackRoles: [],
+          shortlisted: false,
+          openToOther: false,
+        };
+        byActor.set(actorId, c);
+      }
+      return c;
+    };
+    for (const s of allAuditionedSignups) {
+      if (assignedSet.has(s.actorId)) continue;
+      const c = upsert(s.actorId, s.actorName);
+      c.shortlisted = s.status === "shortlisted";
+      c.openToOther = s.openToOther;
+    }
+    for (const cb of acceptedCallbacks) {
+      if (assignedSet.has(cb.actorId)) continue;
+      const c = upsert(cb.actorId, cb.actorName);
+      if (cb.roleId === roleId) c.calledBackForRole = true;
+      else if (!c.otherCallbackRoles.includes(cb.roleName)) {
+        c.otherCallbackRoles.push(cb.roleName);
+      }
+    }
+    // Called-back-for-this-role first, then shortlisted, then everyone else;
+    // alphabetical within each group.
+    return [...byActor.values()].sort((a, b) => {
+      const rank = (c: RoleCandidate) =>
+        c.calledBackForRole ? 0 : c.shortlisted ? 1 : 2;
+      return rank(a) - rank(b) || a.actorName.localeCompare(b.actorName);
+    });
   };
 
   // Panel actor data
@@ -318,32 +371,37 @@ export default function CastingBoardPage() {
     setAssignRoleId(roleId);
     setAssignType(type);
     setSelectedActorId(null);
+    setCandidateSearch("");
+    setShowEveryone(false);
     setAssignModalOpen(true);
   };
 
   const submitAssignment = () => {
     if (!assignRoleId || !selectedActorId) return;
     const role = roles?.find((r) => r.id === assignRoleId);
-    // Look in callbacks first, then in signups
-    const cb = cbs.find((c) => c.actorId === selectedActorId && c.roleId === assignRoleId);
-    const signup = signups.find((s) => s.actorId === selectedActorId);
-    const actorName = cb?.actorName ?? signup?.actorName;
-    if (!role || !actorName) return;
+    const candidate = allCandidates.find((c) => c.actorId === selectedActorId);
+    if (!role || !candidate) return;
     assignMutation.mutate({
       roleId: assignRoleId,
       roleName: role.name,
       actorId: selectedActorId,
-      actorName,
+      actorName: candidate.actorName,
       assignmentType: assignType,
+      allowMultiple: isEnsembleRoleType(role.roleType),
     });
   };
 
-  const callbackCandidates = assignRoleId ? getCallbackCandidates(assignRoleId) : [];
-  const allAuditionedCandidates = assignRoleId ? getAllAuditionedCandidates(assignRoleId) : [];
+  const allCandidates = assignRoleId ? getRoleCandidates(assignRoleId) : [];
+  // Default view (QA finding 11): only people shortlisted or called back
+  // FOR THIS ROLE — the expander/search reach everyone who auditioned.
+  const defaultCandidates = allCandidates.filter(
+    (c) => c.calledBackForRole || c.shortlisted
+  );
 
   // ── Week 4 additive upgrades (conflict chips, compare, soft warnings) ──
 
   const assignRole = roles?.find((r) => r.id === assignRoleId) ?? null;
+  const assignRoleIsEnsemble = !!assignRole && isEnsembleRoleType(assignRole.roleType);
 
   // Conflict-aware pool filter — "all" (default) shows everyone, exactly as before.
   const matchesPoolFilter = (actorId: string) => {
@@ -351,17 +409,18 @@ export default function CastingBoardPage() {
     const days = conflictDayMap.get(actorId) ?? 0;
     return poolFilter === "none" ? days === 0 : days <= 2;
   };
-  const visibleCallbackCandidates = callbackCandidates.filter((c) =>
-    matchesPoolFilter(c.actorId)
+  const searchQuery = candidateSearch.trim().toLowerCase();
+  // Typing a name always searches EVERYONE who auditioned — nobody should be
+  // unfindable just because the expander is closed.
+  const basePool = searchQuery || showEveryone ? allCandidates : defaultCandidates;
+  const visibleCandidates = basePool.filter(
+    (c) =>
+      matchesPoolFilter(c.actorId) &&
+      (!searchQuery || c.actorName.toLowerCase().includes(searchQuery))
   );
-  const visibleAuditionedCandidates = allAuditionedCandidates.filter((s) =>
-    matchesPoolFilter(s.actorId)
-  );
+  const expanderExtraCount = allCandidates.length - defaultCandidates.length;
   const filterHidEveryone =
-    poolFilter !== "all" &&
-    visibleCallbackCandidates.length === 0 &&
-    visibleAuditionedCandidates.length === 0 &&
-    (callbackCandidates.length > 0 || allAuditionedCandidates.length > 0);
+    poolFilter !== "all" && basePool.length > 0 && visibleCandidates.length === 0;
 
   const toggleCompare = (actorId: string) => {
     setCompareIds((prev) =>
@@ -406,6 +465,7 @@ export default function CastingBoardPage() {
       actorId,
       actorName,
       assignmentType: assignType,
+      allowMultiple: isEnsembleRoleType(assignRole.roleType),
     });
   };
 
@@ -416,6 +476,8 @@ export default function CastingBoardPage() {
     setCompareIds([]);
     setCompareOpen(false);
     setPoolFilter("all");
+    setCandidateSearch("");
+    setShowEveryone(false);
   };
 
   return (
@@ -471,6 +533,27 @@ export default function CastingBoardPage() {
         </div>
       </div>
 
+      {/* ── Offers-out breadcrumb → the Offers tracker (QA finding 14) ── */}
+      {(sentAssignments.length > 0 || acceptedAssignments.length > 0 || declinedAssignments.length > 0) && (
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-forest-50 border border-forest-200 rounded-xl mb-6 animate-fade-up" style={{ animationDelay: "25ms" }}>
+          <div className="flex items-center gap-3">
+            <PaperPlaneTilt className="w-5 h-5 text-forest-700" weight="duotone" />
+            <p className="text-sm text-curtain-800">
+              <strong>{acceptedAssignments.length}</strong> accepted ·{" "}
+              <strong>{sentAssignments.length}</strong> awaiting response ·{" "}
+              <strong>{declinedAssignments.length}</strong> declined
+            </p>
+          </div>
+          <Link
+            href={`/shows/${showId}/offers`}
+            className="inline-flex items-center gap-1 text-sm font-semibold text-forest-700 hover:text-forest-800 transition"
+          >
+            Track responses
+            <ArrowRight className="w-4 h-4" weight="bold" />
+          </Link>
+        </div>
+      )}
+
       {/* ── Unfilled Alert ── */}
       {unfilledRoles > 0 && (
         <div className="flex items-center gap-3 p-3 bg-stage-50 border border-stage-200 rounded-xl mb-6 animate-fade-up" style={{ animationDelay: "50ms" }}>
@@ -494,9 +577,8 @@ export default function CastingBoardPage() {
         {roles && roles.length > 0 ? (
           roles.map((role) => {
             const roleAssignments = getAssignmentsForRole(role.id);
+            const isEnsemble = isEnsembleRoleType(role.roleType);
             const hasPrimary = roleAssignments.some((a) => a.assignmentType === "primary");
-            const hasAlternate = roleAssignments.some((a) => a.assignmentType === "alternate");
-            const hasUnderstudy = roleAssignments.some((a) => a.assignmentType === "understudy");
 
             // How many candidates exist for this role (accepted callbacks + other auditioned)
             const candidateCount = acceptedCallbacks.filter((c) => c.roleId === role.id).length;
@@ -520,7 +602,65 @@ export default function CastingBoardPage() {
                   </span>
                 </CardHeader>
 
-                {/* Assignment slots */}
+                {isEnsemble ? (
+                  /* Ensemble pot — holds any number of members (QA finding 13) */
+                  <div className="flex flex-col gap-2 py-2 px-3 rounded-xl bg-cream-50 border border-cream-100">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs text-clay-500">
+                        <UsersThree className="w-4 h-4 text-stage-500" weight="duotone" />
+                        {roleAssignments.length === 0
+                          ? "No one cast yet — an ensemble can hold as many people as you need."
+                          : `${roleAssignments.length} member${roleAssignments.length !== 1 ? "s" : ""} in this ensemble`}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openAssignModal(role.id, "primary")}
+                        icon={<UserCirclePlus className="w-4 h-4" weight="duotone" />}
+                      >
+                        {roleAssignments.length === 0 ? "Add member" : "Add another"}
+                      </Button>
+                    </div>
+                    {roleAssignments.map((assignment) => (
+                      <div
+                        key={assignment.id}
+                        className="flex items-center justify-between py-1.5 border-t border-cream-100"
+                      >
+                        <div
+                          className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition"
+                          onClick={() => openActorPanel(assignment.actorId, showId)}
+                        >
+                          <Avatar name={assignment.actorName} size="sm" />
+                          <span className="text-sm font-semibold text-curtain-900 hover:text-curtain-700">
+                            {assignment.actorName}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {assignment.status === "sent" && (
+                            <Badge variant="warning" size="sm">Pending</Badge>
+                          )}
+                          {assignment.status === "accepted" && (
+                            <Badge variant="success" size="sm">Accepted</Badge>
+                          )}
+                          {assignment.status === "declined" && (
+                            <Badge variant="danger" size="sm">Declined</Badge>
+                          )}
+                          <button
+                            onClick={() => {
+                              setRemoveTarget(assignment);
+                              setRemoveConfirmOpen(true);
+                            }}
+                            className="text-clay-300 hover:text-ruby-500 transition p-1"
+                            title="Remove from ensemble"
+                          >
+                            <Trash className="w-4 h-4" weight="bold" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                /* Principal roles — single occupant per slot type */
                 <div className="flex flex-col gap-3">
                   {ASSIGNMENT_TYPES.map(({ value: type, label }) => {
                     const assignment = roleAssignments.find((a) => a.assignmentType === type);
@@ -573,6 +713,7 @@ export default function CastingBoardPage() {
                     );
                   })}
                 </div>
+                )}
               </Card>
             );
           })
@@ -589,13 +730,34 @@ export default function CastingBoardPage() {
       <Modal
         open={assignModalOpen}
         onClose={closeAssignModal}
-        title={`Select ${assignType} — ${roles?.find((r) => r.id === assignRoleId)?.name ?? "Role"}`}
+        title={
+          assignRoleIsEnsemble
+            ? `Add to ${assignRole?.name ?? "Ensemble"}`
+            : assignType === "primary"
+              ? `Cast ${assignRole?.name ?? "Role"}`
+              : `Select ${assignType} — ${assignRole?.name ?? "Role"}`
+        }
       >
         <div className="py-4">
-          {callbackCandidates.length > 0 || allAuditionedCandidates.length > 0 ? (
+          {allCandidates.length > 0 ? (
             <>
+              {/* Name search — instant, client-side (QA finding 11) */}
+              <div className="relative mb-3">
+                <MagnifyingGlass
+                  className="w-4 h-4 text-clay-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none z-10"
+                  weight="bold"
+                />
+                <Input
+                  value={candidateSearch}
+                  onChange={(e) => setCandidateSearch(e.target.value)}
+                  placeholder="Search everyone who auditioned by name…"
+                  aria-label="Search candidates by name"
+                  className="pl-9"
+                />
+              </div>
+
               {/* Conflict-aware pool chips (Week 4 — additive; "All" = original view) */}
-              <div className="flex flex-wrap items-center gap-2 mb-4">
+              <div className="flex flex-wrap items-center gap-2 mb-3">
                 <Pill variant="filter" active={poolFilter === "all"} onClick={() => setPoolFilter("all")}>
                   All candidates
                 </Pill>
@@ -607,133 +769,159 @@ export default function CastingBoardPage() {
                 </Pill>
               </div>
 
-              <div className="flex flex-col gap-2 mb-6 max-h-72 overflow-y-auto">
-                {/* Callback-accepted actors (primary pool) */}
-                {visibleCallbackCandidates.length > 0 && (
-                  <>
-                    <h3 className="text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-1">
-                      Callback Pool
-                    </h3>
-                    {visibleCallbackCandidates.map((cb) => (
-                      <label
-                        key={cb.id}
-                        className={`flex items-center gap-3 p-3 rounded-xl border transition cursor-pointer ${
-                          selectedActorId === cb.actorId
-                            ? "border-stage-400 bg-stage-50"
-                            : "border-cream-200 hover:border-stage-300"
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="castActor"
-                          value={cb.actorId}
-                          checked={selectedActorId === cb.actorId}
-                          onChange={() => setSelectedActorId(cb.actorId)}
-                          className="accent-stage-500"
-                        />
-                        <Avatar name={cb.actorName} size="sm" />
-                        <div className="flex-1">
-                          <span className="text-sm font-semibold text-curtain-900">{cb.actorName}</span>
-                          {(conflictDayMap.get(cb.actorId) ?? 0) > 0 && (
-                            <span className="flex items-center gap-1 text-[11px] text-stage-700">
-                              <CalendarX className="w-3.5 h-3.5 text-stage-600" weight="duotone" />
-                              {conflictDayMap.get(cb.actorId)} conflict day{conflictDayMap.get(cb.actorId) !== 1 ? "s" : ""}
-                            </span>
-                          )}
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={compareIds.includes(cb.actorId)}
-                          onChange={() => toggleCompare(cb.actorId)}
-                          onClick={(e) => e.stopPropagation()}
-                          disabled={!compareIds.includes(cb.actorId) && compareIds.length >= 3}
-                          className="accent-curtain-700 w-4 h-4"
-                          title="Add to compare"
-                          aria-label={`Compare ${cb.actorName}`}
-                        />
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            openActorPanel(cb.actorId, showId);
-                          }}
-                          className="p-1.5 rounded-lg text-clay-500 hover:text-curtain-900 hover:bg-cream-100 transition"
-                          title="View profile"
-                          aria-label="View profile"
-                        >
-                          <Eye className="w-4 h-4" weight="duotone" />
-                        </button>
-                      </label>
-                    ))}
-                  </>
+              <div className="flex flex-col gap-2 mb-4 max-h-72 overflow-y-auto">
+                <h3 className="text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-1">
+                  {searchQuery
+                    ? "Search results — everyone who auditioned"
+                    : showEveryone
+                      ? "Everyone who auditioned"
+                      : "Called back or shortlisted for this role"}
+                </h3>
+
+                {visibleCandidates.length === 0 && !filterHidEveryone && (
+                  <p className="text-sm text-clay-500 text-center py-4">
+                    {searchQuery
+                      ? "No one matches that name."
+                      : "No one was called back or shortlisted for this role yet — show everyone who auditioned below."}
+                  </p>
                 )}
 
-                {/* All Auditioned actors (broader pool) */}
-                {visibleAuditionedCandidates.length > 0 && (
-                  <>
-                    <h3 className="text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-1 mt-3">
-                      All Auditioned
-                    </h3>
-                    {visibleAuditionedCandidates.map((signup) => (
-                      <label
-                        key={signup.id}
-                        className={`flex items-center gap-3 p-3 rounded-xl border transition cursor-pointer ${
-                          selectedActorId === signup.actorId
-                            ? "border-stage-400 bg-stage-50"
-                            : "border-cream-200 hover:border-stage-300"
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="castActor"
-                          value={signup.actorId}
-                          checked={selectedActorId === signup.actorId}
-                          onChange={() => setSelectedActorId(signup.actorId)}
-                          className="accent-stage-500"
-                        />
-                        <Avatar name={signup.actorName} size="sm" />
-                        <div className="flex-1">
-                          <span className="text-sm font-semibold text-curtain-900">{signup.actorName}</span>
-                          {(conflictDayMap.get(signup.actorId) ?? 0) > 0 && (
-                            <span className="flex items-center gap-1 text-[11px] text-stage-700">
-                              <CalendarX className="w-3.5 h-3.5 text-stage-600" weight="duotone" />
-                              {conflictDayMap.get(signup.actorId)} conflict day{conflictDayMap.get(signup.actorId) !== 1 ? "s" : ""}
-                            </span>
+                {visibleCandidates.map((c) => {
+                  const selected = selectedActorId === c.actorId;
+                  const comparing = compareIds.includes(c.actorId);
+                  const days = conflictDayMap.get(c.actorId) ?? 0;
+                  return (
+                    <div
+                      key={c.actorId}
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={selected}
+                      onClick={() => setSelectedActorId(selected ? null : c.actorId)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedActorId(selected ? null : c.actorId);
+                        }
+                      }}
+                      className={`group flex items-center gap-3 p-3 rounded-xl border transition cursor-pointer ${
+                        selected
+                          ? "border-stage-400 bg-stage-50"
+                          : "border-cream-200 hover:border-stage-300 hover:bg-cream-50"
+                      }`}
+                    >
+                      <Avatar name={c.actorName} size="sm" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-sm font-semibold text-curtain-900">
+                            {c.actorName}
+                          </span>
+                          {c.calledBackForRole && (
+                            <Badge variant="success" size="sm">
+                              Called back · {assignRole?.name}
+                            </Badge>
+                          )}
+                          {c.shortlisted && (
+                            <Badge variant="warning" size="sm">Shortlisted</Badge>
+                          )}
+                          {c.otherCallbackRoles.slice(0, 2).map((rn) => (
+                            <Badge key={rn} variant="default" size="sm">
+                              Called back · {rn}
+                            </Badge>
+                          ))}
+                          {c.otherCallbackRoles.length > 2 && (
+                            <Badge variant="muted" size="sm">
+                              +{c.otherCallbackRoles.length - 2} more
+                            </Badge>
+                          )}
+                          {c.openToOther && (
+                            <Badge variant="muted" size="sm">Open to any role</Badge>
                           )}
                         </div>
-                        <input
-                          type="checkbox"
-                          checked={compareIds.includes(signup.actorId)}
-                          onChange={() => toggleCompare(signup.actorId)}
-                          onClick={(e) => e.stopPropagation()}
-                          disabled={!compareIds.includes(signup.actorId) && compareIds.length >= 3}
-                          className="accent-curtain-700 w-4 h-4"
-                          title="Add to compare"
-                          aria-label={`Compare ${signup.actorName}`}
-                        />
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            openActorPanel(signup.actorId, showId);
-                          }}
-                          className="p-1.5 rounded-lg text-clay-500 hover:text-curtain-900 hover:bg-cream-100 transition"
-                          title="View profile"
-                          aria-label="View profile"
-                        >
-                          <Eye className="w-4 h-4" weight="duotone" />
-                        </button>
-                      </label>
-                    ))}
-                  </>
-                )}
+                        {days > 0 && (
+                          <span className="flex items-center gap-1 text-[11px] text-stage-700 mt-0.5">
+                            <CalendarX className="w-3.5 h-3.5 text-stage-600" weight="duotone" />
+                            {days} conflict day{days !== 1 ? "s" : ""}
+                          </span>
+                        )}
+                      </div>
+                      {/* Cast affordance — appears on hover, sticks when selected (QA finding 12) */}
+                      <span
+                        className={`hidden sm:flex items-center gap-1 text-[11px] font-semibold whitespace-nowrap transition ${
+                          selected
+                            ? "text-stage-700"
+                            : "text-stage-600 opacity-0 group-hover:opacity-100"
+                        }`}
+                      >
+                        <UserCirclePlus className="w-3.5 h-3.5" weight="duotone" />
+                        {selected
+                          ? "Selected"
+                          : assignRoleIsEnsemble
+                            ? `Add to ${assignRole?.name ?? "ensemble"}`
+                            : `Cast as ${assignRole?.name ?? "role"}`}
+                      </span>
+                      {/* Explicit Compare toggle — no more mystery checkbox (QA finding 12) */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleCompare(c.actorId);
+                        }}
+                        disabled={!comparing && compareIds.length >= 3}
+                        className={`flex items-center gap-1 px-2 py-1 rounded-full border text-[11px] font-medium transition flex-shrink-0 ${
+                          comparing
+                            ? "bg-curtain-700 text-white border-curtain-700"
+                            : "bg-cream-100 text-clay-600 border-cream-300 hover:border-curtain-400 disabled:opacity-40 disabled:cursor-not-allowed"
+                        }`}
+                        title="Add to side-by-side compare (up to 3)"
+                        aria-pressed={comparing}
+                        aria-label={`Compare ${c.actorName}`}
+                      >
+                        <Scales className="w-3.5 h-3.5" weight="duotone" />
+                        Compare
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          openActorPanel(c.actorId, showId);
+                        }}
+                        className="p-1.5 rounded-lg text-clay-500 hover:text-curtain-900 hover:bg-cream-100 transition flex-shrink-0"
+                        title="View profile"
+                        aria-label="View profile"
+                      >
+                        <Eye className="w-4 h-4" weight="duotone" />
+                      </button>
+                    </div>
+                  );
+                })}
+
                 {/* Filter hid everyone — friendly note, not an empty screen */}
                 {filterHidEveryone && (
                   <p className="text-sm text-clay-500 text-center py-4">
                     Nobody matches that conflict filter — try &ldquo;All candidates.&rdquo;
                   </p>
+                )}
+
+                {/* Full-pool expander (QA finding 11) */}
+                {!searchQuery && expanderExtraCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowEveryone((v) => !v)}
+                    className="flex items-center justify-center gap-1.5 py-2 text-xs font-semibold text-curtain-700 hover:text-curtain-900 border border-dashed border-cream-300 hover:border-curtain-300 rounded-xl transition"
+                  >
+                    {showEveryone ? (
+                      <>
+                        Show only this role&apos;s callbacks &amp; shortlist
+                        <CaretUp className="w-3.5 h-3.5" weight="bold" />
+                      </>
+                    ) : (
+                      <>
+                        Show everyone who auditioned ({expanderExtraCount} more)
+                        <CaretDown className="w-3.5 h-3.5" weight="bold" />
+                      </>
+                    )}
+                  </button>
                 )}
               </div>
 
@@ -767,7 +955,11 @@ export default function CastingBoardPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   {compareIds.length >= 2 && (
-                    <Button variant="outline" onClick={() => setCompareOpen(true)}>
+                    <Button
+                      variant="outline"
+                      onClick={() => setCompareOpen(true)}
+                      icon={<Scales className="w-4 h-4" weight="duotone" />}
+                    >
                       Compare ({compareIds.length})
                     </Button>
                   )}
@@ -781,7 +973,11 @@ export default function CastingBoardPage() {
                     loading={assignMutation.isPending}
                     disabled={!selectedActorId}
                   >
-                    Assign Actor
+                    {assignRoleIsEnsemble
+                      ? `Add to ${assignRole?.name ?? "Ensemble"}`
+                      : assignType === "primary"
+                        ? `Cast as ${assignRole?.name ?? "Role"}`
+                        : `Assign ${assignType}`}
                   </Button>
                 </div>
               </div>

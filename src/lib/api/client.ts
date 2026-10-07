@@ -190,6 +190,8 @@ function rowToCastAssignment(r: any): CastAssignment {
     assignmentType: r.assignment_type,
     status: r.status,
     sortOrder: r.sort_order,
+    createdAt: r.created_at ?? null,
+    updatedAt: r.updated_at ?? null,
   };
 }
 
@@ -3131,16 +3133,37 @@ export async function getCastAssignments(showId: string): Promise<CastAssignment
     .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
-export async function createCastAssignment(data: Omit<CastAssignment, "id">): Promise<CastAssignment> {
+export async function createCastAssignment(
+  data: Omit<CastAssignment, "id">,
+  opts?: {
+    /**
+     * Ensemble casting (roleType ensemble / featured_ensemble): the role is a
+     * "pot" that holds many people, so skip the one-per-slot check and only
+     * block the SAME actor being added to the same role twice.
+     */
+    allowMultiple?: boolean;
+  }
+): Promise<CastAssignment> {
   if (isSupabaseConfigured) {
     const supabase = getSupabase();
-    const { data: existing, error: existingError } = await supabase
-      .from("cast_assignments").select("id")
-      .eq("show_id", data.showId).eq("role_id", data.roleId)
-      .eq("assignment_type", data.assignmentType).neq("status", "withdrawn")
-      .maybeSingle();
-    if (existingError) throw new Error(existingError.message);
-    if (existing) throw new Error(`A ${data.assignmentType} is already assigned to this role.`);
+    if (opts?.allowMultiple) {
+      // Ensemble pot — only guard against the same person twice.
+      const { data: dupe, error: dupeError } = await supabase
+        .from("cast_assignments").select("id")
+        .eq("show_id", data.showId).eq("role_id", data.roleId)
+        .eq("actor_id", data.actorId).neq("status", "withdrawn")
+        .maybeSingle();
+      if (dupeError) throw new Error(dupeError.message);
+      if (dupe) throw new Error(`${data.actorName || "This actor"} is already in this role.`);
+    } else {
+      const { data: existing, error: existingError } = await supabase
+        .from("cast_assignments").select("id")
+        .eq("show_id", data.showId).eq("role_id", data.roleId)
+        .eq("assignment_type", data.assignmentType).neq("status", "withdrawn")
+        .maybeSingle();
+      if (existingError) throw new Error(existingError.message);
+      if (existing) throw new Error(`A ${data.assignmentType} is already assigned to this role.`);
+    }
 
     const { data: row, error } = await supabase
       .from("cast_assignments")
@@ -3151,19 +3174,40 @@ export async function createCastAssignment(data: Omit<CastAssignment, "id">): Pr
       })
       .select(CAST_SELECT)
       .single();
-    if (error) throw new Error(error.message);
+    if (error) {
+      // Friendly message if a DB-level unique constraint (older schema)
+      // rejects a second assignment on the same role — never a raw crash.
+      if (/duplicate key|unique constraint|23505/i.test(error.message)) {
+        throw new Error(
+          "This role can't take another assignment yet — it may already be filled."
+        );
+      }
+      throw new Error(error.message);
+    }
     return rowToCastAssignment(row);
   }
   await delay(300);
-  // Check for duplicate assignment (same role + same type)
-  const existing = castAssignments.find(
-    (a) =>
-      a.showId === data.showId &&
-      a.roleId === data.roleId &&
-      a.assignmentType === data.assignmentType &&
-      a.status !== "withdrawn"
-  );
-  if (existing) throw new Error(`A ${data.assignmentType} is already assigned to this role.`);
+  if (opts?.allowMultiple) {
+    // Ensemble pot — only block the same actor twice in the same role.
+    const dupe = castAssignments.find(
+      (a) =>
+        a.showId === data.showId &&
+        a.roleId === data.roleId &&
+        a.actorId === data.actorId &&
+        a.status !== "withdrawn"
+    );
+    if (dupe) throw new Error(`${data.actorName || "This actor"} is already in this role.`);
+  } else {
+    // Check for duplicate assignment (same role + same type)
+    const existing = castAssignments.find(
+      (a) =>
+        a.showId === data.showId &&
+        a.roleId === data.roleId &&
+        a.assignmentType === data.assignmentType &&
+        a.status !== "withdrawn"
+    );
+    if (existing) throw new Error(`A ${data.assignmentType} is already assigned to this role.`);
+  }
 
   const newAssignment: CastAssignment = {
     ...data,
@@ -3349,6 +3393,45 @@ export async function sendOffers(showId: string): Promise<number> {
     }
   }
   return count;
+}
+
+/**
+ * Re-notify an actor about a still-pending ("sent") offer — the Offers
+ * tracker's "Send reminder" action. Reuses the same notification pipeline
+ * as sendOffers (create_notification RPC). Throws a friendly error if the
+ * offer is no longer pending.
+ */
+export async function sendOfferReminder(assignmentId: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    const { data, error } = await getSupabase()
+      .from("cast_assignments").select(CAST_SELECT)
+      .eq("id", assignmentId).maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new Error("Offer not found.");
+    const assignment = rowToCastAssignment(data);
+    if (assignment.status !== "sent") {
+      throw new Error("This offer has already been responded to.");
+    }
+    const showTitle = await getShowTitle(assignment.showId);
+    await pushNotification({
+      recipientId: assignment.actorId,
+      showId: assignment.showId,
+      type: "cast",
+      title: "Reminder: Your Offer Is Waiting",
+      body: `Reminder: your offer for ${assignment.roleName || "a role"} in ${showTitle ?? "the show"} is waiting for your response.`,
+      showTitle,
+      linkUrl: `/offers/${assignment.id}`,
+    });
+    return;
+  }
+  await delay(300);
+  const assignment = castAssignments.find((a) => a.id === assignmentId);
+  if (!assignment) throw new Error("Offer not found.");
+  if (assignment.status !== "sent") {
+    throw new Error("This offer has already been responded to.");
+  }
+  // Mock mode has no notification store for this — succeeding is enough
+  // for the demo (the tracker shows the "reminder sent" state locally).
 }
 
 /**

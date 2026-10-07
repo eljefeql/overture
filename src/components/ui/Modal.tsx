@@ -38,9 +38,13 @@ export function Modal({ open, onClose, title, children, className }: Props) {
   if (!open) return null;
 
   return (
-    // Outer wrapper catches all clicks, prevents them from reaching page beneath
+    // Outer wrapper catches all clicks, prevents them from reaching page beneath.
+    // Overlay layering scale (keep consistent across components):
+    //   nav z-30 · SlidePanel z-40/z-50 · Modal z-[60] · Lightbox z-[70] · Toast z-[80]
+    // Modals sit ABOVE the slide panel so panel-launched dialogs (e.g. Send
+    // to Callback) are never buried under it.
     <div
-      className="fixed inset-0 z-40"
+      className="fixed inset-0 z-[60]"
       onClick={(e) => {
         // Only close if clicking the backdrop area (not the modal panel)
         if (e.target === e.currentTarget) onClose();

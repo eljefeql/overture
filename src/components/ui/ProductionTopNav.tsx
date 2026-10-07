@@ -14,7 +14,6 @@ import {
   GearSix,
   SignOut,
   UserCircle,
-  Plus,
   Check,
   List as ListIcon,
   Buildings,
@@ -319,19 +318,14 @@ function ShowSwitcher({
             </Link>
           ))}
           <hr className="border-cream-100 my-1" />
+          {/* Creating a show belongs to the theatre (shows list page), not
+              the show switcher — owner QA finding, 2026-07-07. */}
           <Link
             href="/shows"
             className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-700 hover:bg-cream-50 transition"
           >
             <ListIcon className="w-4 h-4 text-stage-500" weight="duotone" />
             View All Shows
-          </Link>
-          <Link
-            href="/shows/new"
-            className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-curtain-700 hover:bg-cream-50 transition"
-          >
-            <Plus className="w-4 h-4 text-stage-500" weight="bold" />
-            New Show
           </Link>
         </div>
       )}
