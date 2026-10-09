@@ -57,16 +57,21 @@ export function PreviewBanner(props: Props) {
 
   if (!user || !target) return null;
 
+  // Sticky just below the top nav (nav is h-14, sticky z-30) so team viewers
+  // never lose the way back while scrolling the public page.
   return (
-    <div className="bg-stage-100">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-        <Eye className="w-4 h-4 text-stage-700 flex-shrink-0" weight="duotone" />
-        <span className="text-curtain-800">
-          You&apos;re viewing the public page — this is what actors see.
+    <div className="sticky top-14 z-20 bg-stage-100 border-b border-stage-300 shadow-sm">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+        <span className="inline-flex items-center gap-1.5 text-curtain-900 font-semibold">
+          <Eye className="w-4 h-4 text-stage-700 flex-shrink-0" weight="duotone" />
+          You&apos;re viewing the public page
+        </span>
+        <span className="text-curtain-800 hidden sm:inline">
+          — this is what actors see.
         </span>
         <Link
           href={target.href}
-          className="inline-flex items-center gap-1 font-semibold text-curtain-900 hover:underline"
+          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white border border-stage-300 font-semibold text-curtain-900 hover:bg-stage-50 transition-colors"
         >
           <ArrowLeft className="w-3.5 h-3.5" weight="bold" />
           Back to {target.name}

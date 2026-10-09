@@ -312,7 +312,7 @@ export default function TheatreHubPage() {
       <VenuesSection orgId={orgId} />
 
       {/* ===== Key People ===== */}
-      <LeadershipSection orgId={orgId} />
+      <LeadershipSection orgId={orgId} onInviteMember={() => setInviteOpen(true)} />
 
       {/* ===== Photos ===== */}
       <OrgPhotosSection orgId={orgId} />
@@ -369,6 +369,9 @@ export default function TheatreHubPage() {
         <p className="text-xs text-clay-500 mb-3">
           Members belong to the theatre itself. Admins can manage the theatre and create
           shows; members see the theatre and join productions they&apos;re added to.
+          Inviting someone saves the invite under their email — they join automatically
+          the next time they sign in with it. (Invite emails aren&apos;t sent yet, so give
+          them a heads-up.)
         </p>
         <div className="flex flex-col gap-3">
           {(members ?? []).map((member) =>
@@ -1107,7 +1110,13 @@ function VenueModal({
    Key People (org leadership)
    ============================================================ */
 
-function LeadershipSection({ orgId }: { orgId: string }) {
+function LeadershipSection({
+  orgId,
+  onInviteMember,
+}: {
+  orgId: string;
+  onInviteMember: () => void;
+}) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<OrgLeader | "new" | null>(null);
@@ -1145,8 +1154,9 @@ function LeadershipSection({ orgId }: { orgId: string }) {
         </Button>
       </div>
       <p className="text-xs text-clay-500 mb-3">
-        Your artistic and managing leadership, board, or resident staff. Shown publicly so
-        people know who runs the company. They don&apos;t need Overture accounts.
+        A leadership listing shown on your public theatre page — your artistic and
+        managing leadership, board, or resident staff. Adding someone here is
+        display-only: it doesn&apos;t create an account or send them anything.
       </p>
 
       {list.length > 0 ? (
@@ -1222,6 +1232,7 @@ function LeadershipSection({ orgId }: { orgId: string }) {
         leader={editing === "new" ? null : editing}
         open={editing !== null}
         onClose={() => setEditing(null)}
+        onInviteMember={onInviteMember}
       />
     </div>
   );
@@ -1232,11 +1243,13 @@ function LeaderModal({
   leader,
   open,
   onClose,
+  onInviteMember,
 }: {
   orgId: string;
   leader: OrgLeader | null;
   open: boolean;
   onClose: () => void;
+  onInviteMember: () => void;
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -1275,6 +1288,22 @@ function LeaderModal({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
+        <div className="p-3 rounded-xl bg-cream-50 border border-cream-200">
+          <p className="text-[11px] text-clay-500 leading-relaxed">
+            This just lists them on your public theatre page — it doesn&apos;t create
+            an account or notify them.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onInviteMember();
+            }}
+            className="mt-1.5 text-[11px] font-semibold text-curtain-800 hover:text-curtain-900 hover:underline"
+          >
+            Want them to manage the theatre with you? Invite them as a member →
+          </button>
+        </div>
       </div>
       <div className="mt-6 flex justify-end gap-3">
         <Button variant="ghost" size="sm" onClick={onClose}>

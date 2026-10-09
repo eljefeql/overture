@@ -34,6 +34,19 @@ export function formatTeamRole(role: string): string {
   return map[role] ?? role;
 }
 
+/** Role gender requirement → display label. "any" means open to all genders
+ *  (distinct from non-binary); null means the team didn't specify. */
+export function formatRoleGender(gender: string | null): string | null {
+  if (!gender) return null;
+  const map: Record<string, string> = {
+    any: "Any gender",
+    male: "Male",
+    female: "Female",
+    non_binary: "Non-binary",
+  };
+  return map[gender] ?? gender;
+}
+
 export function formatDate(date: string | null): string {
   if (!date) return "";
   // Date-only strings (YYYY-MM-DD) parse as UTC midnight, which renders a day

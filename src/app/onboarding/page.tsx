@@ -4,7 +4,7 @@ import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/features/auth/AuthContext";
-import { createActorProfile, createOrg } from "@/lib/api/client";
+import { createActorProfile, createOrg, createOrgLeader } from "@/lib/api/client";
 import { completeActorOnboarding, completeMakerOnboarding } from "@/lib/api/onboarding";
 import { selectOrgForUser } from "@/features/auth/useOrg";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
@@ -39,6 +39,74 @@ const PRONOUN_OPTIONS: { value: Pronouns; label: string }[] = [
   { value: "any pronouns", label: "any pronouns" },
   { value: "prefer not to say", label: "Prefer not to say" },
 ];
+
+/* Theatre-maker "Your Primary Role" — grouped by the CreativeRole taxonomy
+   (TALENT_DISCOVERY_SPEC). The label is what the person actually does at the
+   theatre (board seats included); `teamRole` is the closest show-permissions
+   enum value, used only for the session's active-role state. */
+type PrimaryRoleOption = { value: string; label: string; teamRole: TeamRole };
+
+const PRIMARY_ROLE_GROUPS: { group: string; options: PrimaryRoleOption[] }[] = [
+  {
+    group: "Leadership & Board",
+    options: [
+      { value: "artistic_director", label: "Artistic Director", teamRole: "director" },
+      { value: "executive_director", label: "Executive / Managing Director", teamRole: "producer" },
+      { value: "board_president", label: "Board President", teamRole: "producer" },
+      { value: "board_member", label: "Board Member", teamRole: "producer" },
+      { value: "producer", label: "Producer", teamRole: "producer" },
+    ],
+  },
+  {
+    group: "Direction",
+    options: [
+      { value: "director", label: "Director", teamRole: "director" },
+      { value: "asst_director", label: "Assistant Director", teamRole: "asst_director" },
+    ],
+  },
+  {
+    group: "Music & Movement",
+    options: [
+      { value: "music_director", label: "Music Director", teamRole: "music_director" },
+      { value: "choreographer", label: "Choreographer", teamRole: "choreographer" },
+      { value: "accompanist", label: "Accompanist / Rehearsal Pianist", teamRole: "accompanist" },
+    ],
+  },
+  {
+    group: "Stage Management",
+    options: [
+      { value: "stage_manager", label: "Stage Manager", teamRole: "stage_manager" },
+      { value: "asst_stage_manager", label: "Assistant Stage Manager", teamRole: "asst_stage_manager" },
+    ],
+  },
+  {
+    group: "Design & Technical",
+    options: [
+      { value: "technical_director", label: "Technical Director", teamRole: "producer" },
+      { value: "set_designer", label: "Set Designer", teamRole: "producer" },
+      { value: "costume_designer", label: "Costume Designer", teamRole: "producer" },
+      { value: "lighting_designer", label: "Lighting Designer", teamRole: "producer" },
+      { value: "sound_designer", label: "Sound Designer", teamRole: "producer" },
+    ],
+  },
+  {
+    group: "Front of House & Community",
+    options: [
+      { value: "house_manager", label: "House Manager", teamRole: "producer" },
+      { value: "marketing", label: "Marketing & Publicity", teamRole: "producer" },
+      { value: "volunteer_coordinator", label: "Volunteer Coordinator", teamRole: "producer" },
+      { value: "teaching_artist", label: "Teaching Artist", teamRole: "producer" },
+    ],
+  },
+  {
+    group: "Something else",
+    options: [{ value: "other", label: "Other", teamRole: "producer" }],
+  },
+];
+
+const PRIMARY_ROLE_OPTIONS: PrimaryRoleOption[] = PRIMARY_ROLE_GROUPS.flatMap(
+  (g) => g.options
+);
 
 const ACTOR_STEPS = ["Profile", "Talent", "Private", "Done"];
 const MAKER_STEPS = ["You", "Theatre", "Done"];
@@ -102,7 +170,7 @@ function OnboardingWizard() {
   const [dealbreakers, setDealbreakers] = useState("");
 
   // ── Maker ──
-  const [teamRole, setTeamRole] = useState<TeamRole>("director");
+  const [primaryRole, setPrimaryRole] = useState<string>("director");
   const [orgName, setOrgName] = useState("");
   const [orgCity, setOrgCity] = useState("");
   const [orgState, setOrgState] = useState("");
@@ -195,7 +263,20 @@ function OnboardingWizard() {
       if (user?.id && newOrg?.id) selectOrgForUser(user.id, newOrg.id);
       // … and must be visible to useOrg before /shows/new.
       queryClient.invalidateQueries({ queryKey: ["myOrg"] });
-      switchRole({ type: "team", showId: "show-1", teamRole });
+      const roleOption =
+        PRIMARY_ROLE_OPTIONS.find((o) => o.value === primaryRole) ??
+        PRIMARY_ROLE_OPTIONS[0];
+      switchRole({ type: "team", showId: "show-1", teamRole: roleOption.teamRole });
+      // Keep the person's REAL title: list them under Key People on their new
+      // theatre (editable/removable any time from /org). Best-effort — never
+      // blocks onboarding.
+      if (newOrg?.id && roleOption.value !== "other") {
+        createOrgLeader(newOrg.id, {
+          name: displayName.trim(),
+          title: roleOption.label,
+          photoUrl: null,
+        }).catch(() => {});
+      }
       track("onboarding_completed", { path: "maker" });
     },
     onError: () => toast("error", "Something went wrong. Please try again."),
@@ -703,17 +784,19 @@ function OnboardingWizard() {
                 Your Primary Role
               </label>
               <select
-                value={teamRole}
-                onChange={(e) => setTeamRole(e.target.value as TeamRole)}
+                value={primaryRole}
+                onChange={(e) => setPrimaryRole(e.target.value)}
                 className="w-full px-3 py-2.5 text-sm rounded-xl border border-cream-300 bg-cream-50 outline-none focus:ring-2 focus:ring-curtain-200 focus:border-curtain-300"
               >
-                <option value="director">Director</option>
-                <option value="music_director">Music Director</option>
-                <option value="choreographer">Choreographer</option>
-                <option value="stage_manager">Stage Manager</option>
-                <option value="producer">Producer</option>
-                <option value="asst_director">Asst. Director</option>
-                <option value="accompanist">Accompanist</option>
+                {PRIMARY_ROLE_GROUPS.map((group) => (
+                  <optgroup key={group.group} label={group.group}>
+                    {group.options.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
             </div>
           </div>

@@ -44,7 +44,7 @@ import { TeamNotesFeed } from "@/components/casting/TeamNotesFeed";
 import { useUIStore } from "@/stores/useUIStore";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/features/auth/AuthContext";
-import { formatHeight } from "@/lib/utils";
+import { formatHeight, formatRoleGender } from "@/lib/utils";
 import {
   Users,
   Warning,
@@ -597,9 +597,11 @@ export default function CastingBoardPage() {
                   <div className="flex items-center gap-3">
                     <CardTitle>{role.name}</CardTitle>
                     <Badge variant="default" size="sm">{role.roleType}</Badge>
-                    <span className="text-xs text-clay-400">
-                      {role.gender === "any" ? "Any gender" : role.gender}
-                    </span>
+                    {role.gender && (
+                      <span className="text-xs text-clay-400">
+                        {formatRoleGender(role.gender)}
+                      </span>
+                    )}
                   </div>
                   <span className="text-xs text-clay-400">
                     {candidateCount} candidate{candidateCount !== 1 ? "s" : ""}

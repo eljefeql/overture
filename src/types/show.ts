@@ -127,6 +127,12 @@ export type Show = {
   performanceLocation: string | null;
   callbackContactName: string | null;
   callbackContactPhone: string | null;
+  /** Day-of contact for "questions or last-minute issues" on the public
+   *  audition page (QA finding 11). Optional: columns land with migration
+   *  017, and reads/writes degrade gracefully before the paste. When empty,
+   *  the public page falls back to the stage manager from the show team. */
+  dayOfContactName?: string | null;
+  dayOfContactInfo?: string | null;
   posterUrl: string | null;
   city: string;
   state: string;

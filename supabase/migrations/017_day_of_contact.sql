@@ -1,11 +1,3 @@
--- ╔══════════════════════════════════════════════════════════════════════╗
--- ║  PASTE_ME_NEXT — Migration 017 only                                    ║
--- ╚══════════════════════════════════════════════════════════════════════╝
--- Paste this whole file once in Supabase Dashboard → SQL Editor → Run
--- (on BOTH staging and prod).
--- (Migrations 001–016 are already applied on staging AND prod as of
---  2026-10-09.)
-
 -- ============================================================================
 -- Overture 2.0 — Migration 017: editable day-of contact on shows
 -- ============================================================================
@@ -25,6 +17,7 @@
 -- breaks before this is pasted.
 --
 -- Idempotent — safe to paste more than once.
+-- Apply in: Supabase Dashboard → SQL Editor → paste → Run.
 -- NOTE: after applying, PROD_SETUP.sql should be regenerated to include this
 -- migration before new production projects are set up.
 -- ============================================================================

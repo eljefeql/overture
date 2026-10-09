@@ -40,7 +40,7 @@ import {
 } from "@/components/ui";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/features/auth/AuthContext";
-import { formatDate, formatTime, formatTeamRole, groupBlocksByDay } from "@/lib/utils";
+import { formatDate, formatTime, formatTeamRole, formatRoleGender, groupBlocksByDay } from "@/lib/utils";
 import {
   PencilSimple,
   Plus,
@@ -65,6 +65,7 @@ import {
   Clock,
   CalendarX,
   HouseLine,
+  Phone,
 } from "@phosphor-icons/react";
 import { SHOW_STATUS_LABELS } from "@/lib/constants";
 import type { ShowStatus, ShowType, RoleType, GenderReq, TeamRole } from "@/types";
@@ -173,6 +174,7 @@ export default function ShowSetupPage() {
     auditionStart: "", auditionEnd: "", callbackDate: "",
     callbackLocation: "", auditionNotes: "",
     rehearsalStart: "", showOpen: "", showClose: "",
+    dayOfContactName: "", dayOfContactInfo: "",
   });
 
   // Add role form
@@ -383,6 +385,8 @@ export default function ShowSetupPage() {
       rehearsalStart: show.rehearsalStart ?? "",
       showOpen: show.showOpen ?? "",
       showClose: show.showClose ?? "",
+      dayOfContactName: show.dayOfContactName ?? "",
+      dayOfContactInfo: show.dayOfContactInfo ?? "",
     });
     setEditDetailsOpen(true);
   };
@@ -413,7 +417,11 @@ export default function ShowSetupPage() {
       toast("error", "Rehearsal should start before opening night.");
       return;
     }
-    updateShowMutation.mutate(editForm);
+    updateShowMutation.mutate({
+      ...editForm,
+      dayOfContactName: editForm.dayOfContactName.trim() || null,
+      dayOfContactInfo: editForm.dayOfContactInfo.trim() || null,
+    });
   };
 
   const openEditRole = (role: typeof roles[0]) => {
@@ -779,6 +787,12 @@ export default function ShowSetupPage() {
                   {show.auditionLocation}
                 </div>
               )}
+              {(show.dayOfContactName || show.dayOfContactInfo) && (
+                <div className="flex items-center gap-2 text-curtain-800 sm:col-span-2">
+                  <Phone className="w-4 h-4 text-stage-500" weight="duotone" />
+                  Day-of contact: {[show.dayOfContactName, show.dayOfContactInfo].filter(Boolean).join(" · ")}
+                </div>
+              )}
               {show.auditionNotes && (
                 <p className="text-xs text-clay-500 sm:col-span-2 mt-2">
                   {show.auditionNotes}
@@ -814,7 +828,7 @@ export default function ShowSetupPage() {
                       <span className="text-sm font-semibold text-curtain-900">{role.name}</span>
                       <Badge variant="default" size="sm">{role.roleType.replace("_", " ")}</Badge>
                       {role.gender && (
-                        <span className="text-xs text-clay-400">{role.gender === "any" ? "any gender" : role.gender}</span>
+                        <span className="text-xs text-clay-400">{formatRoleGender(role.gender)}</span>
                       )}
                       <PencilSimple className="w-3 h-3 text-clay-300" weight="bold" />
                     </button>
@@ -1182,6 +1196,27 @@ export default function ShowSetupPage() {
             </div>
           </div>
 
+          <hr className="border-cream-100" />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2">
+              <p className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">Day-of Contact</p>
+              <p className="text-xs text-clay-500 mt-1">
+                Who actors should reach with questions or last-minute issues. Shown
+                to signed-in actors on the audition page — never to anonymous
+                visitors. Leave blank to use your stage manager from the team.
+              </p>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">Contact Name</label>
+              <Input value={editForm.dayOfContactName} onChange={(e) => setEditForm({ ...editForm, dayOfContactName: e.target.value })} placeholder="e.g. Jamie Alvarez" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">Phone or Email</label>
+              <Input value={editForm.dayOfContactInfo} onChange={(e) => setEditForm({ ...editForm, dayOfContactInfo: e.target.value })} placeholder="e.g. (207) 555-0142" />
+            </div>
+          </div>
+
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="ghost" onClick={() => setEditDetailsOpen(false)}>Cancel</Button>
             <Button onClick={submitEditDetails} loading={updateShowMutation.isPending}>Save Changes</Button>
@@ -1488,6 +1523,9 @@ function PosterCard({
   const mutation = useMutation({
     mutationFn: (file: File) => uploadShowPoster(orgId, showId, file),
     onSuccess: () => {
+      // THIS page renders from ["showSetup", showId] — invalidating it is what
+      // makes the new poster appear immediately (QA finding: it didn't).
+      queryClient.invalidateQueries({ queryKey: ["showSetup", showId] });
       queryClient.invalidateQueries({ queryKey: ["show", showId] });
       queryClient.invalidateQueries({ queryKey: ["shows"] });
       toast("success", "Poster updated!");

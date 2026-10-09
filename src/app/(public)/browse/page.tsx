@@ -22,8 +22,8 @@ export default function BrowsePage() {
           Open Auditions
         </h1>
         <p className="text-sm text-clay-500">
-          Browse community theatre auditions. Sign up to get matches near you,
-          save shows, and audition.
+          Browse community theatre auditions. Create a free profile to sign up
+          for auditions and keep track of your shows.
         </p>
       </div>
 
@@ -33,7 +33,7 @@ export default function BrowsePage() {
           <div className="flex items-center gap-3">
             <MagnifyingGlass className="w-5 h-5 text-stage-500 flex-shrink-0" weight="duotone" />
             <p className="text-sm text-curtain-800 flex-1">
-              Create a free profile to see auditions sorted by distance from you.
+              Create a free profile to sign up for these auditions — it takes two minutes.
             </p>
             <Link href="/signup">
               <Button size="sm">Sign up</Button>

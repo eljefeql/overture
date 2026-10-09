@@ -32,7 +32,7 @@ import {
   DateBlock,
   SectionHeader,
 } from "@/components/ui";
-import { formatDate, formatTime, formatTeamRole, formatConflictText, groupBlocksByDay } from "@/lib/utils";
+import { formatDate, formatTime, formatTeamRole, formatConflictText, formatRoleGender, groupBlocksByDay } from "@/lib/utils";
 import {
   Calendar,
   MapPin,
@@ -1146,6 +1146,13 @@ function ContactBlock({
   const isPostAudition = phase === "callback-pending" || phase === "callback-confirmed" || phase === "cast-offered" || phase === "cast-accepted";
   const showCallbackContact = isPostAudition && show.callbackContactName;
 
+  // Explicit day-of contact set by the team (migration 017). When present it
+  // replaces the stage-manager fallback below.
+  const dayOfContact =
+    show.dayOfContactName || show.dayOfContactInfo
+      ? { name: show.dayOfContactName ?? "", info: show.dayOfContactInfo ?? "" }
+      : null;
+
   return (
     <Card variant="flat" className="mb-6">
       <SectionHeader>
@@ -1181,11 +1188,44 @@ function ContactBlock({
         </div>
       )}
 
-      {showCallbackContact && stageManager && (
+      {showCallbackContact && (dayOfContact || stageManager) && (
         <hr className="border-cream-200 my-3" />
       )}
 
-      {stageManager && (
+      {/* Explicit day-of contact (QA finding 11) — set on the show setup
+          page; the stage manager from the team remains the fallback. */}
+      {dayOfContact && (
+        <div className="flex items-center gap-3">
+          <Avatar name={dayOfContact.name || "Production Team"} size="md" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-curtain-900">
+              {dayOfContact.name || "Production team"}
+            </p>
+            {dayOfContact.info && (
+              <p className="text-xs text-clay-500">{dayOfContact.info}</p>
+            )}
+          </div>
+          {dayOfContact.info && (
+            <a
+              href={
+                dayOfContact.info.includes("@")
+                  ? `mailto:${dayOfContact.info}`
+                  : `tel:${dayOfContact.info.replace(/\D/g, "")}`
+              }
+              className="p-2.5 rounded-xl bg-white border border-cream-200 text-stage-600 hover:bg-cream-50 transition"
+              title={dayOfContact.info.includes("@") ? "Email" : "Call"}
+            >
+              {dayOfContact.info.includes("@") ? (
+                <Envelope className="w-5 h-5" weight="duotone" />
+              ) : (
+                <Phone className="w-5 h-5" weight="duotone" />
+              )}
+            </a>
+          )}
+        </div>
+      )}
+
+      {!dayOfContact && stageManager && (
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-curtain-100 flex items-center justify-center">
             <span className="text-sm font-bold text-curtain-700">
@@ -1379,8 +1419,8 @@ function RolesList({ roles }: { roles: ShowRole[] | undefined }) {
                   </p>
                 )}
                 <div className="flex items-center gap-3 text-[11px] text-clay-400">
-                  {role.gender && role.gender !== "any" && (
-                    <span className="capitalize">{role.gender}</span>
+                  {role.gender && (
+                    <span>{formatRoleGender(role.gender)}</span>
                   )}
                   {role.ageRange && <span>Ages {role.ageRange}</span>}
                   {role.vocalRange && <span>{role.vocalRange}</span>}

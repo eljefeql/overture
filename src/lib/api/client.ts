@@ -76,6 +76,8 @@ function rowToShow(r: any): Show {
     performanceLocation: r.performance_location,
     callbackContactName: r.callback_contact_name,
     callbackContactPhone: r.callback_contact_phone,
+    dayOfContactName: r.day_of_contact_name ?? null,
+    dayOfContactInfo: r.day_of_contact_info ?? null,
     posterUrl: r.poster_url ?? null,
     city: r.city, state: r.state,
     distanceMiles: null, // computed client-side once geo lands
@@ -2669,6 +2671,8 @@ function showUpdatesToRow(updates: Partial<Show>): Record<string, any> {
   if (updates.performanceLocation !== undefined) row.performance_location = updates.performanceLocation;
   if (updates.callbackContactName !== undefined) row.callback_contact_name = updates.callbackContactName;
   if (updates.callbackContactPhone !== undefined) row.callback_contact_phone = updates.callbackContactPhone;
+  if (updates.dayOfContactName !== undefined) row.day_of_contact_name = updates.dayOfContactName;
+  if (updates.dayOfContactInfo !== undefined) row.day_of_contact_info = updates.dayOfContactInfo;
   if (updates.posterUrl !== undefined) row.poster_url = updates.posterUrl;
   if (updates.city !== undefined) row.city = updates.city;
   if (updates.state !== undefined) row.state = updates.state;
@@ -2721,12 +2725,20 @@ export async function createShow(data: Omit<Show, "id" | "createdAt" | "updatedA
 
 export async function updateShow(showId: string, updates: Partial<Show>): Promise<Show> {
   if (isSupabaseConfigured) {
-    const { data, error } = await getSupabase()
-      .from("shows")
-      .update({ ...showUpdatesToRow(updates), updated_at: new Date().toISOString() })
-      .eq("id", showId)
-      .select(SHOW_SELECT)
-      .single();
+    const supabase = getSupabase();
+    const row = { ...showUpdatesToRow(updates), updated_at: new Date().toISOString() };
+    // day_of_contact_* lands with migration 017 — graceful pre-paste: a
+    // missing-column error retries without those keys (same pattern as
+    // open_to_ensemble in signUpForAudition).
+    let { data, error } = await supabase
+      .from("shows").update(row).eq("id", showId).select(SHOW_SELECT).single();
+    if (error && /day_of_contact/.test(error.message)) {
+      const rest: Record<string, unknown> = { ...row };
+      delete rest.day_of_contact_name;
+      delete rest.day_of_contact_info;
+      ({ data, error } = await supabase
+        .from("shows").update(rest).eq("id", showId).select(SHOW_SELECT).single());
+    }
     if (error) throw new Error(error.message);
     return rowToShow(data);
   }

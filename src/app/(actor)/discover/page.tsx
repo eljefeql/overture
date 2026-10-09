@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/features/auth/AuthContext";
 import { getOpenAuditions, getActor } from "@/lib/api/client";
 import type { DiscoverFilters } from "@/lib/api/client";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import type { Show } from "@/types";
 import { ShowCard } from "@/components/shows/ShowCard";
 import { EmptyState, PageSkeleton, SectionHeader } from "@/components/ui";
@@ -35,12 +36,19 @@ const TYPE_OPTIONS = [
   { value: "revue" as const, label: "Revues" },
 ];
 
+// "Distance" sorting is mock-only for now: cloud shows have no geocoded
+// distance yet (distanceMiles is null), so offering it would be a lie.
 const SORT_OPTIONS = [
   { value: "suggested" as const, label: "Suggested" },
   { value: "newest" as const, label: "Newest" },
   { value: "date" as const, label: "Audition Date" },
-  { value: "distance" as const, label: "Distance" },
+  ...(!isSupabaseConfigured ? [{ value: "distance" as const, label: "Distance" }] : []),
 ];
+
+// Cloud mode has no geocoding yet — distanceMiles is null on every show, so
+// the radius picker and the For You / Further Out split would be fiction.
+// Mock mode keeps its fake distances and the full UI.
+const hasDistanceData = !isSupabaseConfigured;
 
 /* ============================================================
    Page
@@ -88,10 +96,15 @@ export default function DiscoverPage() {
     );
   });
 
-  // Split into sections
+  // Split into sections. Without distance data (cloud mode), everything
+  // non-promoted lands in one undivided list — no fake radius split.
   const promoted = filteredShows?.filter((s) => s.isPromoted) ?? [];
-  const forYou = filteredShows?.filter((s) => !s.isPromoted && (s.distanceMiles ?? 999) <= activeRadius) ?? [];
-  const nearby = filteredShows?.filter((s) => !s.isPromoted && (s.distanceMiles ?? 999) > activeRadius) ?? [];
+  const forYou = hasDistanceData
+    ? filteredShows?.filter((s) => !s.isPromoted && (s.distanceMiles ?? 999) <= activeRadius) ?? []
+    : filteredShows?.filter((s) => !s.isPromoted) ?? [];
+  const nearby = hasDistanceData
+    ? filteredShows?.filter((s) => !s.isPromoted && (s.distanceMiles ?? 999) > activeRadius) ?? []
+    : [];
 
   if (isLoading) return <PageSkeleton />;
 
@@ -112,7 +125,15 @@ export default function DiscoverPage() {
         />
       </div>
 
-      {/* Radius banner */}
+      {/* Radius banner — only when distance data exists (mock mode). In
+          cloud mode geocoding isn't built yet, so be honest instead. */}
+      {!hasDistanceData && (
+        <div className="flex items-center gap-1.5 mb-4 text-sm text-clay-500">
+          <MapPin className="w-4 h-4 text-stage-500" weight="duotone" />
+          Distance filtering is coming — showing auditions everywhere for now.
+        </div>
+      )}
+      {hasDistanceData && (
       <div className="relative mb-4">
         <button
           onClick={() => setShowRadiusPicker(!showRadiusPicker)}
@@ -149,6 +170,7 @@ export default function DiscoverPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* Sort / Filter bar */}
       <div className="flex items-center gap-2 mb-6 overflow-x-auto">
@@ -206,7 +228,7 @@ export default function DiscoverPage() {
           {/* For You section */}
           {forYou.length > 0 && (
             <div className="mb-6">
-              <SectionHeader>For You</SectionHeader>
+              {hasDistanceData && <SectionHeader>For You</SectionHeader>}
               <div className="flex flex-col gap-4">
                 {forYou.map((show) => (
                   <ShowCard
@@ -239,7 +261,11 @@ export default function DiscoverPage() {
         <EmptyState
           icon={<MaskHappy className="w-12 h-12" weight="duotone" />}
           title="No auditions match your filters"
-          description="Try widening your radius or changing your filters."
+          description={
+            hasDistanceData
+              ? "Try widening your radius or changing your filters."
+              : "Try a different search or show type."
+          }
         />
       )}
     </div>
