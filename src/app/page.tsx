@@ -95,9 +95,8 @@ export default function LandingPage() {
       {/* Nav */}
       <nav className="px-6 py-4 flex items-center justify-between max-w-6xl mx-auto">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-stage-500 flex items-center justify-center">
-            <span className="text-curtain-900 font-display text-lg font-bold">O</span>
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-mark.png" alt="" className="w-9 h-9" />
           <span className="text-lg font-display text-white">Overture</span>
         </div>
         <div className="flex items-center gap-3">
@@ -355,11 +354,8 @@ export default function LandingPage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-8 mb-10">
             <div className="col-span-2 sm:col-span-1">
               <div className="flex items-center gap-2.5 mb-3">
-                <div className="w-8 h-8 rounded-lg bg-stage-500 flex items-center justify-center">
-                  <span className="text-curtain-900 font-display text-base font-bold">
-                    O
-                  </span>
-                </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/logo-mark.png" alt="" className="w-8 h-8" />
                 <span className="text-base font-display text-white">Overture</span>
               </div>
               <p className="text-xs text-curtain-500 leading-relaxed">

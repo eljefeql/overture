@@ -71,9 +71,8 @@ function LoginForm() {
     <div className="w-full max-w-sm">
       {/* Logo */}
       <div className="flex flex-col items-center mb-10">
-        <div className="w-14 h-14 rounded-xl bg-stage-500 flex items-center justify-center mb-4">
-          <span className="text-curtain-900 font-display text-2xl font-bold">O</span>
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo-mark.png" alt="" className="w-14 h-14 mb-4" />
         <h1 className="text-3xl font-display text-white mb-1">Welcome back</h1>
         <p className="text-sm text-curtain-300">Sign in to Overture</p>
       </div>

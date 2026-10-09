@@ -101,11 +101,8 @@ export function Nav() {
           <div className="flex items-center justify-between h-14">
             {/* Left: Logo */}
             <Link href="/" className="flex items-center gap-2.5 flex-shrink-0">
-              <div className="w-8 h-8 rounded-lg bg-stage-500 flex items-center justify-center">
-                <span className="text-curtain-900 font-display text-base font-bold">
-                  O
-                </span>
-              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo-mark.png" alt="" className="w-8 h-8" />
               <span className="text-base font-display text-white">
                 Overture
               </span>

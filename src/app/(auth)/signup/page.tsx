@@ -111,9 +111,8 @@ function SignupContent() {
 
   return (
     <div className="w-full max-w-md text-center">
-      <div className="w-14 h-14 rounded-xl bg-stage-500 flex items-center justify-center mx-auto mb-6">
-        <span className="text-curtain-900 font-display text-2xl font-bold">O</span>
-      </div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/logo-mark.png" alt="" className="w-14 h-14 mx-auto mb-6" />
       <h1 className="text-3xl font-display text-white mb-2">Join Overture</h1>
       <p className="text-sm text-curtain-300 mb-10">
         Create your account and find your next role.
