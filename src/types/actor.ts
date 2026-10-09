@@ -56,6 +56,11 @@ export type ActorProfile = {
   ageRangeHigh: number | null;
   locationCity: string | null;
   locationState: string | null;
+  /** Geocoded home coordinates (migration 018) — written best-effort when
+   *  city/state is saved; optional so mock data and pre-paste rows stay
+   *  valid. Null/absent = never geocoded → no distances on Discover. */
+  latitude?: number | null;
+  longitude?: number | null;
   travelRadius: number | null;
   isAvailable: boolean;
   resumePdfUrl: string | null;

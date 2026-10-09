@@ -48,6 +48,8 @@ const delay = (ms = 200) => new Promise((r) => setTimeout(r, ms));
 // everything else still uses the mock layer below.
 // ============================================================
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
+import { geocodeCityState, geocodeAddress } from "@/lib/geocode";
+import { haversineMiles } from "@/lib/utils";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function rowToOrg(r: any): Org {
@@ -58,6 +60,7 @@ function rowToOrg(r: any): Org {
     foundedYear: r.founded_year ?? null, mission: r.mission ?? null,
     facebookUrl: r.facebook_url ?? null, instagramUrl: r.instagram_url ?? null,
     ticketingUrl: r.ticketing_url ?? null,
+    latitude: r.latitude ?? null, longitude: r.longitude ?? null,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
@@ -294,6 +297,9 @@ async function getActorFromSupabase(userId: string): Promise<ActorWithProfile | 
         ageRangeHigh: d.age_range_high,
         locationCity: profileRow.location_city,
         locationState: profileRow.location_state,
+        // Geocoded coordinates (migration 018) — null/undefined pre-paste.
+        latitude: profileRow.latitude ?? null,
+        longitude: profileRow.longitude ?? null,
         travelRadius: profileRow.travel_radius,
         isAvailable: profileRow.is_available,
         resumePdfUrl: d.resume_pdf_url,
@@ -648,8 +654,25 @@ export async function updateOrg(
     if (updates.facebookUrl !== undefined) row.facebook_url = updates.facebookUrl;
     if (updates.instagramUrl !== undefined) row.instagram_url = updates.instagramUrl;
     if (updates.ticketingUrl !== undefined) row.ticketing_url = updates.ticketingUrl;
-    const { data, error } = await getSupabase()
+    // Geocode a changed city/state best-effort (migration 018). A failed
+    // lookup returns null → no coordinate write; the save never blocks on it.
+    if (updates.city !== undefined && updates.state !== undefined) {
+      const geo = await geocodeCityState(updates.city, updates.state);
+      if (geo) {
+        row.latitude = geo.latitude;
+        row.longitude = geo.longitude;
+      }
+    }
+    // Pre-018 the columns don't exist — retry without them (the
+    // open_to_ensemble pattern), so the save never fails before the paste.
+    let { data, error } = await getSupabase()
       .from("orgs").update(row).eq("id", orgId).select("*").maybeSingle();
+    if (error && /latitude|longitude/.test(error.message)) {
+      delete row.latitude;
+      delete row.longitude;
+      ({ data, error } = await getSupabase()
+        .from("orgs").update(row).eq("id", orgId).select("*").maybeSingle());
+    }
     if (error) throw new Error(error.message);
     // RLS: only the org owner can update — a blocked update comes back empty.
     if (!data) throw new Error("Only the theatre owner can edit these details.");
@@ -677,6 +700,7 @@ function rowToVenue(r: any): Venue {
     capacity: r.capacity ?? null, accessibilityNotes: r.accessibility_notes ?? null,
     parkingNotes: r.parking_notes ?? null, isPrimary: !!r.is_primary,
     spaceType: (r.space_type ?? "performance") as Venue["spaceType"],
+    latitude: r.latitude ?? null, longitude: r.longitude ?? null,
     sortOrder: r.sort_order ?? 0, createdAt: r.created_at,
   };
 }
@@ -733,15 +757,29 @@ export async function createVenue(
     }
     const { count } = await supabase
       .from("venues").select("id", { count: "exact", head: true }).eq("org_id", orgId);
-    const { data: row, error } = await supabase
-      .from("venues")
-      .insert({
-        org_id: orgId, name: data.name, address: data.address,
-        capacity: data.capacity, accessibility_notes: data.accessibilityNotes,
-        parking_notes: data.parkingNotes, is_primary: data.isPrimary,
-        space_type: data.spaceType, sort_order: count ?? 0,
-      })
-      .select("*").single();
+    // Geocode the free-text address best-effort (migration 018) — a failed
+    // lookup returns null and the venue saves without coordinates.
+    const geo = await geocodeAddress(data.address);
+    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+    const insertRow: Record<string, any> = {
+      org_id: orgId, name: data.name, address: data.address,
+      capacity: data.capacity, accessibility_notes: data.accessibilityNotes,
+      parking_notes: data.parkingNotes, is_primary: data.isPrimary,
+      space_type: data.spaceType, sort_order: count ?? 0,
+    };
+    if (geo) {
+      insertRow.latitude = geo.latitude;
+      insertRow.longitude = geo.longitude;
+    }
+    // Pre-018 the columns don't exist — retry without them.
+    let { data: row, error } = await supabase
+      .from("venues").insert(insertRow).select("*").single();
+    if (error && /latitude|longitude/.test(error.message)) {
+      delete insertRow.latitude;
+      delete insertRow.longitude;
+      ({ data: row, error } = await supabase
+        .from("venues").insert(insertRow).select("*").single());
+    }
     if (error) throw new Error(error.message);
     return rowToVenue(row);
   }
@@ -779,8 +817,23 @@ export async function updateVenue(
     if (data.parkingNotes !== undefined) row.parking_notes = data.parkingNotes;
     if (data.isPrimary !== undefined) row.is_primary = data.isPrimary;
     if (data.spaceType !== undefined) row.space_type = data.spaceType;
-    const { data: updated, error } = await supabase
+    // Re-geocode when the address changes (migration 018, best-effort).
+    if (data.address !== undefined) {
+      const geo = await geocodeAddress(data.address);
+      if (geo) {
+        row.latitude = geo.latitude;
+        row.longitude = geo.longitude;
+      }
+    }
+    // Pre-018 the columns don't exist — retry without them.
+    let { data: updated, error } = await supabase
       .from("venues").update(row).eq("id", venueId).select("*").maybeSingle();
+    if (error && /latitude|longitude/.test(error.message)) {
+      delete row.latitude;
+      delete row.longitude;
+      ({ data: updated, error } = await supabase
+        .from("venues").update(row).eq("id", venueId).select("*").maybeSingle());
+    }
     if (error) throw new Error(error.message);
     if (!updated) throw new Error("Only the theatre's owner or admins can edit venues.");
     return rowToVenue(updated);
@@ -1402,13 +1455,59 @@ export type DiscoverFilters = {
   sortBy: "suggested" | "newest" | "date" | "distance";
 };
 
-export async function getOpenAuditions(filters?: DiscoverFilters): Promise<Show[]> {
+/** SHOW_SELECT plus the org's coordinates — only used when the signed-in
+ *  viewer has coordinates of their own, so Discover can compute real
+ *  distances. Falls back to SHOW_SELECT pre-migration-018. */
+const GEO_SHOW_SELECT = "*, orgs(name, latitude, longitude)";
+
+export async function getOpenAuditions(
+  filters?: DiscoverFilters,
+  /** The signed-in viewer's geocoded home coordinates (from their profile).
+   *  Omitted/null (anonymous /browse, un-geocoded profile) = distances stay
+   *  null, exactly as before geocoding shipped. */
+  viewer?: { latitude: number; longitude: number } | null
+): Promise<Show[]> {
   let results: Show[];
   if (isSupabaseConfigured) {
-    const { data, error } = await getSupabase()
-      .from("shows").select(SHOW_SELECT).eq("status", "auditions_open");
-    if (error) throw new Error(error.message);
-    results = (data ?? []).map(rowToShow);
+    const supabase = getSupabase();
+    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+    let data: any[] | null = null;
+    if (viewer) {
+      // Pre-018 the org coordinate columns don't exist — a missing-column
+      // error falls through to the plain select (null distances).
+      const geoRes = await supabase
+        .from("shows").select(GEO_SHOW_SELECT).eq("status", "auditions_open");
+      if (!geoRes.error) {
+        data = geoRes.data ?? [];
+      } else if (!/latitude|longitude/.test(geoRes.error.message)) {
+        throw new Error(geoRes.error.message);
+      }
+    }
+    if (data === null) {
+      const { data: plain, error } = await supabase
+        .from("shows").select(SHOW_SELECT).eq("status", "auditions_open");
+      if (error) throw new Error(error.message);
+      data = plain ?? [];
+    }
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    results = data.map((r: any) => {
+      const show = rowToShow(r);
+      // Real distance only when BOTH sides have coordinates; shows whose
+      // org was never geocoded keep distanceMiles = null (never dropped —
+      // the Discover UI groups them under "Further Out").
+      if (
+        viewer &&
+        typeof r.orgs?.latitude === "number" &&
+        typeof r.orgs?.longitude === "number"
+      ) {
+        show.distanceMiles = haversineMiles(
+          viewer.latitude, viewer.longitude,
+          r.orgs.latitude, r.orgs.longitude
+        );
+      }
+      return show;
+    });
+    /* eslint-enable @typescript-eslint/no-explicit-any */
   } else {
     await delay();
     results = shows.filter((s) => s.status === "auditions_open");
@@ -2017,8 +2116,25 @@ export async function updateActorProfile(
     if (updates.resumePdfUrl !== undefined) detailsRow.resume_pdf_url = updates.resumePdfUrl;
     /* eslint-enable @typescript-eslint/no-explicit-any */
 
+    // Geocode a changed home city/state best-effort (migration 018). A
+    // failed lookup returns null → no coordinate write; never blocks a save.
+    if (updates.locationCity !== undefined && updates.locationState !== undefined) {
+      const geo = await geocodeCityState(updates.locationCity, updates.locationState);
+      if (geo) {
+        profileRow.latitude = geo.latitude;
+        profileRow.longitude = geo.longitude;
+      }
+    }
+
     if (Object.keys(profileRow).length > 0) {
-      const { error } = await supabase.from("profiles").update(profileRow).eq("id", actorId);
+      // Pre-018 the columns don't exist — retry without them (the
+      // open_to_ensemble pattern), so profile saves never fail pre-paste.
+      let { error } = await supabase.from("profiles").update(profileRow).eq("id", actorId);
+      if (error && /latitude|longitude/.test(error.message)) {
+        delete profileRow.latitude;
+        delete profileRow.longitude;
+        ({ error } = await supabase.from("profiles").update(profileRow).eq("id", actorId));
+      }
       if (error) throw new Error(error.message);
     }
     if (Object.keys(detailsRow).length > 0) {

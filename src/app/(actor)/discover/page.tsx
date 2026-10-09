@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/features/auth/AuthContext";
 import { getOpenAuditions, getActor } from "@/lib/api/client";
@@ -36,19 +37,12 @@ const TYPE_OPTIONS = [
   { value: "revue" as const, label: "Revues" },
 ];
 
-// "Distance" sorting is mock-only for now: cloud shows have no geocoded
-// distance yet (distanceMiles is null), so offering it would be a lie.
-const SORT_OPTIONS = [
+const BASE_SORT_OPTIONS = [
   { value: "suggested" as const, label: "Suggested" },
   { value: "newest" as const, label: "Newest" },
   { value: "date" as const, label: "Audition Date" },
-  ...(!isSupabaseConfigured ? [{ value: "distance" as const, label: "Distance" }] : []),
 ];
-
-// Cloud mode has no geocoding yet — distanceMiles is null on every show, so
-// the radius picker and the For You / Further Out split would be fiction.
-// Mock mode keeps its fake distances and the full UI.
-const hasDistanceData = !isSupabaseConfigured;
+const DISTANCE_SORT_OPTION = { value: "distance" as const, label: "Distance" };
 
 /* ============================================================
    Page
@@ -58,7 +52,7 @@ export default function DiscoverPage() {
   const { user } = useAuth();
 
   // Get actor profile for default radius + city
-  const { data: actor } = useQuery({
+  const { data: actor, isLoading: actorLoading } = useQuery({
     queryKey: ["actor", user?.id],
     queryFn: () => getActor(user?.id ?? ""),
     enabled: !!user,
@@ -67,6 +61,23 @@ export default function DiscoverPage() {
   const profileRadius = actor?.profile?.travelRadius ?? 25;
   const profileCity = actor?.profile?.locationCity ?? "Riverside";
   const profileState = actor?.profile?.locationState ?? "CA";
+
+  // The viewer's geocoded home coordinates (cloud: profiles.latitude /
+  // longitude, migration 018; written best-effort whenever city/state is
+  // saved). Distance UI is DATA-aware, not mode-aware: it appears whenever
+  // real distances can be computed — always in mock mode (fake distances),
+  // and in cloud mode once the viewer's profile has coordinates.
+  const viewerCoords =
+    isSupabaseConfigured &&
+    typeof actor?.profile?.latitude === "number" &&
+    typeof actor?.profile?.longitude === "number"
+      ? { latitude: actor.profile.latitude, longitude: actor.profile.longitude }
+      : null;
+  const hasDistanceData = !isSupabaseConfigured || viewerCoords !== null;
+
+  const sortOptions = hasDistanceData
+    ? [...BASE_SORT_OPTIONS, DISTANCE_SORT_OPTION]
+    : BASE_SORT_OPTIONS;
 
   // Filter state (NOT tied to profile)
   const [radius, setRadius] = useState<number | null>(null); // null until profile loads
@@ -81,8 +92,8 @@ export default function DiscoverPage() {
   const filters: DiscoverFilters = { radius: activeRadius, showType, sortBy };
 
   const { data: shows, isLoading } = useQuery({
-    queryKey: ["openAuditions", filters],
-    queryFn: () => getOpenAuditions(filters),
+    queryKey: ["openAuditions", filters, viewerCoords],
+    queryFn: () => getOpenAuditions(filters, viewerCoords),
   });
 
   // Client-side search filter
@@ -125,12 +136,21 @@ export default function DiscoverPage() {
         />
       </div>
 
-      {/* Radius banner — only when distance data exists (mock mode). In
-          cloud mode geocoding isn't built yet, so be honest instead. */}
-      {!hasDistanceData && (
+      {/* Radius banner — only when distance data exists (mock mode, or
+          cloud with a geocoded profile). A coordinate-less cloud viewer
+          gets an honest nudge to add their city instead. */}
+      {!hasDistanceData && !actorLoading && (
         <div className="flex items-center gap-1.5 mb-4 text-sm text-clay-500">
-          <MapPin className="w-4 h-4 text-stage-500" weight="duotone" />
-          Distance filtering is coming — showing auditions everywhere for now.
+          <MapPin className="w-4 h-4 text-stage-500 flex-shrink-0" weight="duotone" />
+          <span>
+            <Link
+              href="/profile"
+              className="font-semibold text-curtain-700 hover:text-curtain-900 underline decoration-cream-200 underline-offset-2 transition"
+            >
+              Add your city to your profile
+            </Link>{" "}
+            to see auditions by distance — showing everywhere for now.
+          </span>
         </div>
       )}
       {hasDistanceData && (
@@ -182,7 +202,7 @@ export default function DiscoverPage() {
           onChange={(e) => setSortBy(e.target.value as DiscoverFilters["sortBy"])}
           className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-cream-200 bg-white text-curtain-700 outline-none focus:ring-2 focus:ring-curtain-200"
         >
-          {SORT_OPTIONS.map((opt) => (
+          {sortOptions.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>

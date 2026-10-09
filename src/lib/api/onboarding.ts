@@ -6,6 +6,7 @@
 
 import { getSupabase } from "@/lib/supabase/client";
 import { claimPendingInvites } from "@/lib/api/client";
+import { geocodeCityState } from "@/lib/geocode";
 import type { ActorProfile, BucketListShow, Org, Pronouns, User } from "@/types";
 
 /**
@@ -20,20 +21,36 @@ export async function completeActorOnboarding(input: {
   const supabase = getSupabase();
   const { user, profile } = input;
 
-  const { error: profileError } = await supabase
-    .from("profiles")
-    .update({
-      display_name: user.displayName,
-      pronouns: user.pronouns,
-      bio: profile.bio ?? null,
-      phone: profile.phone ?? null,
-      location_city: profile.locationCity ?? null,
-      location_state: profile.locationState ?? null,
-      travel_radius: profile.travelRadius ?? null,
-      is_available: true,
-      onboarding_step: "complete",
-    })
-    .eq("id", user.id);
+  // Geocode the home city/state best-effort (migration 018) — a failed
+  // lookup returns null and onboarding simply saves without coordinates.
+  const geo = await geocodeCityState(profile.locationCity, profile.locationState);
+
+  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+  const profileRow: Record<string, any> = {
+    display_name: user.displayName,
+    pronouns: user.pronouns,
+    bio: profile.bio ?? null,
+    phone: profile.phone ?? null,
+    location_city: profile.locationCity ?? null,
+    location_state: profile.locationState ?? null,
+    travel_radius: profile.travelRadius ?? null,
+    is_available: true,
+    onboarding_step: "complete",
+  };
+  if (geo) {
+    profileRow.latitude = geo.latitude;
+    profileRow.longitude = geo.longitude;
+  }
+  // Pre-018 the columns don't exist — retry without them (the
+  // open_to_ensemble pattern), so onboarding never fails pre-paste.
+  let { error: profileError } = await supabase
+    .from("profiles").update(profileRow).eq("id", user.id);
+  if (profileError && /latitude|longitude/.test(profileError.message)) {
+    delete profileRow.latitude;
+    delete profileRow.longitude;
+    ({ error: profileError } = await supabase
+      .from("profiles").update(profileRow).eq("id", user.id));
+  }
   if (profileError) throw new Error(profileError.message);
 
   const { error: detailsError } = await supabase.from("actor_details").upsert({
@@ -92,16 +109,30 @@ export async function completeMakerOnboarding(input: {
     "theatre";
   const slug = `${baseSlug}-${Math.random().toString(36).slice(2, 7)}`;
 
-  const { data: orgRow, error: orgError } = await supabase
-    .from("orgs")
-    .insert({
-      name: org.name.trim(),
-      slug,
-      city: org.city,
-      state: org.state,
-    })
-    .select("*")
-    .single();
+  // Geocode the theatre's city/state best-effort (migration 018) — a failed
+  // lookup returns null and the org is created without coordinates.
+  const geo = await geocodeCityState(org.city, org.state);
+
+  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+  const orgInsert: Record<string, any> = {
+    name: org.name.trim(),
+    slug,
+    city: org.city,
+    state: org.state,
+  };
+  if (geo) {
+    orgInsert.latitude = geo.latitude;
+    orgInsert.longitude = geo.longitude;
+  }
+  // Pre-018 the columns don't exist — retry without them.
+  let { data: orgRow, error: orgError } = await supabase
+    .from("orgs").insert(orgInsert).select("*").single();
+  if (orgError && /latitude|longitude/.test(orgError.message)) {
+    delete orgInsert.latitude;
+    delete orgInsert.longitude;
+    ({ data: orgRow, error: orgError } = await supabase
+      .from("orgs").insert(orgInsert).select("*").single());
+  }
   if (orgError) throw new Error(orgError.message);
 
   const { error: memberError } = await supabase.from("org_members").insert({

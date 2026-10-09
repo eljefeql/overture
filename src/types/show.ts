@@ -19,6 +19,10 @@ export type Org = {
   description: string | null;
   city: string | null;
   state: string | null;
+  /** Geocoded coordinates (migration 018) — best-effort at save time;
+   *  optional so mock orgs and pre-paste rows stay valid. */
+  latitude?: number | null;
+  longitude?: number | null;
   websiteUrl: string | null;
   codeOfConduct: string | null;
   // Theatre profile depth (Sprint D, Phase 2)
@@ -43,6 +47,9 @@ export type Venue = {
   parkingNotes: string | null;
   isPrimary: boolean;
   spaceType: SpaceType;
+  /** Geocoded from the free-text address (migration 018) — best-effort. */
+  latitude?: number | null;
+  longitude?: number | null;
   sortOrder: number;
   createdAt: string;
 };
