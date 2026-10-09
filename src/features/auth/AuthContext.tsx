@@ -31,7 +31,7 @@ type AuthState = {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<User | null>;
   signUp: (email: string, password: string) => Promise<SignUpResult>;
-  loginWithGoogle: () => Promise<User>;
+  loginWithGoogle: () => Promise<User | null>;
   logout: () => void;
   switchRole: (role: AuthRole) => void;
   updateUser: (updates: Partial<User>) => void;
@@ -253,6 +253,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // provider is configured. In cloud mode the pages show a "coming soon"
   // toast instead of calling this; the simulated flow remains for mock mode.
   const loginWithGoogle = useCallback(async () => {
+    if (isSupabaseConfigured) {
+      // Real OAuth: the browser leaves for Google and returns to
+      // /auth/callback, where the session lands and routing happens.
+      // Returns null because this page is about to navigate away.
+      // Pre-flight the provider so a disabled Google fails as a toast
+      // here instead of a raw JSON error page after the redirect.
+      try {
+        const settings = await fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/settings`,
+          { headers: { apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! } }
+        ).then((r) => r.json());
+        if (settings?.external && settings.external.google === false) {
+          throw new Error("Google sign-in isn't enabled yet — use email for now.");
+        }
+      } catch (e) {
+        if (e instanceof Error && /isn't enabled/.test(e.message)) throw e;
+        // Settings unreachable — proceed; the authorize endpoint decides.
+      }
+      const { error } = await getSupabase().auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: `${window.location.origin}/auth/callback` },
+      });
+      if (error) {
+        throw new Error(
+          /not enabled|disabled/i.test(error.message)
+            ? "Google sign-in isn't enabled yet — use email for now."
+            : error.message
+        );
+      }
+      return null;
+    }
     setIsLoading(true);
     await new Promise((r) => setTimeout(r, 700));
     const googleUser: User = {

@@ -100,7 +100,9 @@ export function Nav() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex items-center justify-between h-14">
             {/* Left: Logo */}
-            <Link href="/" className="flex items-center gap-2.5 flex-shrink-0">
+            {/* Signed-in users go home, not to the marketing page —
+                landing on a logged-out-looking page reads as a sign-out. */}
+            <Link href={user ? "/discover" : "/"} className="flex items-center gap-2.5 flex-shrink-0">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/logo-mark.png" alt="" className="w-8 h-8" />
               <span className="text-base font-display text-white">

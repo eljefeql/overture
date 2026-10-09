@@ -47,16 +47,20 @@ function SignupContent() {
   }
 
   async function handleGoogle() {
-    if (isSupabaseConfigured) {
-      toast("info", "Google sign-in arrives with provider setup — use email for now.");
-      return;
-    }
     setGoogleLoading(true);
-    const u = await loginWithGoogle();
-    if (u.onboardingStep !== "complete") {
-      router.push(onboardingUrl);
-    } else {
-      router.push(next ?? "/discover");
+    try {
+      const u = await loginWithGoogle();
+      // null = cloud mode, the browser is redirecting to Google —
+      // keep the spinner until the page unloads.
+      if (!u) return;
+      if (u.onboardingStep !== "complete") {
+        router.push(onboardingUrl);
+      } else {
+        router.push(next ?? "/discover");
+      }
+    } catch (err) {
+      setGoogleLoading(false);
+      toast("error", err instanceof Error ? err.message : "Google sign-in failed.");
     }
   }
 
