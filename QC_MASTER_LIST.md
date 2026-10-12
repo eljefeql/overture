@@ -37,14 +37,14 @@ findings (3), Fiddler population findings (2), carried infrastructure. Status mo
 | 27 | **Modular adoption: "Have you already cast this show?"** | At show creation, ask which parts they want: team recruiting / casting / hub only. Already-cast shows skip auditions entirely: director bulk-adds cast members (name+email, invite rides the new invite-email pipeline) straight into the Hub. STRATEGIC — the churn-killer for theatres scared of switching mid-season. NEEDS DESIGN PASS first (pairs with #12 supplemental calls). |
 | 28 | Platform admin, minimal slice | `platform_admin` flag on Chris's account → /admin: read-only directory of all theatres/users/shows, dupe spotting. Password resets: already available in the Supabase dashboard today (Auth → user → ⋯ → Send password recovery) — document, don't rebuild. Merge tools are P4. |
 
-## P3 — Decisions needed from Chris before building
+## P3 — Decisions (ANSWERED 2026-10-12 → build in P2 wave)
 
-| # | Item | Question |
+| # | Item | Decision |
 |---|---|---|
-| 20 | Require headshot to sign up for auditions | Hard requirement (blocks signup until photo upload) or strong nudge? Minors? Phone-upload flow exists. |
-| 21 | Actor profiles viewable from Hub / by castmates | No route exists today for viewing others' profiles (known gap). Who may view: team only? whole cast? Respect privacy tiers either way. |
-| 22 | Favicon: purple box + gold O ("Overture-icon.png") | Need the file from Chris (or I re-create the old mark as an icon). Replaces the star favicon only — nav logos stay the star. |
-| 23 | Landing page refresh | Owner wants a refresh; scope TBD — separate design conversation, not in the bug batch. |
+| 20 | Headshot at audition signup | HARD NUDGE, not a block: "you'll need this to get cast"-grade prompt in the signup flow when no headshot exists, with inline upload; signup still possible without. |
+| 21 | Actor profiles viewable by others | Build the missing view-someone's-profile page at PUBLIC tier only: photo, vitals/stats, past shows/credits, skills — NO contact info, NO measurements/sizing, NO location, nothing private/hidden. Any signed-in user may view (gating model: authenticated, never anon). Link from Hub people lists + casting surfaces. |
+| 22 | Favicon | ✔ DONE 2026-10-12 — owner-supplied flattened purple-box star icon installed as src/app/icon.png; nav logos keep the transparent mark. |
+| 23 | Landing page refresh | Own session with research & recommendations, after the hardening week. |
 
 ## P4 — Parked (explicitly later)
 
