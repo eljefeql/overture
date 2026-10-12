@@ -370,8 +370,10 @@ export default function TheatreHubPage() {
           Members belong to the theatre itself. Admins can manage the theatre and create
           shows; members see the theatre and join productions they&apos;re added to.
           Inviting someone saves the invite under their email — they join automatically
-          the next time they sign in with it. (Invite emails aren&apos;t sent yet, so give
-          them a heads-up.)
+          the next time they sign in with it.{" "}
+          {isSupabaseConfigured
+            ? "New to Overture? They'll get an email invitation (usually within 15 minutes) with a link to create their account."
+            : "(Demo mode doesn't send invite emails, so give them a heads-up.)"}
         </p>
         <div className="flex flex-col gap-3">
           {(members ?? []).map((member) =>
@@ -754,8 +756,10 @@ function InviteMemberModal({
           <EnvelopeSimple className="w-4 h-4 text-stage-500 flex-shrink-0 mt-0.5" weight="duotone" />
           <p className="text-[11px] text-clay-500 leading-relaxed">
             They&apos;ll appear as pending, and anyone who signs in or signs up with this
-            email joins automatically. Invite emails are coming soon — for now, let them
-            know directly.
+            email joins automatically.{" "}
+            {isSupabaseConfigured
+              ? "If they already use Overture they'll see the invite in the app; if they're new, an email invitation goes out within about 15 minutes."
+              : "Demo mode doesn't send invite emails — let them know directly."}
           </p>
         </div>
       </div>

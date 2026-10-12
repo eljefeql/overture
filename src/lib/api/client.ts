@@ -1200,8 +1200,10 @@ export async function getOrgMembers(orgId: string): Promise<OrgMember[]> {
 
 /**
  * Invite someone to the theatre.
- * Cloud: inserts an org_invites row; if the email already belongs to an
- * Overture account they also get an in-app notification (RPC, migration 006).
+ * Cloud: inserts an org_invites row, then notify_org_invite (migration 020)
+ * pings the invitee — existing accounts get an in-app notification (which
+ * also emails via the webhook), new people get a queued invite email
+ * (guest_emails → send-reminders cron, ~15 min).
  * Acceptance happens automatically at their next sign-in (claimPendingInvites).
  * Mock: creates a pending membership record.
  */
@@ -1254,8 +1256,13 @@ export async function inviteOrgMember(
     }
     if (error) throw new Error(error.message);
 
-    // Existing Overture user? Tell them in-app (best-effort; RPC in 006).
-    if (profileRow) {
+    // Notify the invitee — best-effort, never fails the invite.
+    // Existing Overture user → in-app notification (emails via the
+    // notifications webhook). No account yet → migration 020's version
+    // queues a real invite email (guest_emails, sent by the send-reminders
+    // cron within ~15 min). Pre-020 the RPC silently no-ops for unknown
+    // emails, so calling it unconditionally is safe in both worlds.
+    {
       const { error: notifyError } = await supabase.rpc("notify_org_invite", {
         p_invite_id: invite.id,
       });

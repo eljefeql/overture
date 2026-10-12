@@ -33,6 +33,7 @@ import {
   SectionHeader,
 } from "@/components/ui";
 import { formatDate, formatTime, formatTeamRole, formatConflictText, formatRoleGender, groupBlocksByDay } from "@/lib/utils";
+import { publicShareUrl, copyText } from "@/lib/share";
 import {
   Calendar,
   MapPin,
@@ -273,22 +274,36 @@ export default function AuditionDetailPage() {
   const signupCount = slotAvailability?.reduce((sum, g) => sum + g.taken, 0) ?? 0;
 
   async function handleShare() {
-    const url = window.location.href;
-    const shareData = {
-      title: `${show!.title} — Auditions`,
-      text: `${show!.orgName} is casting ${show!.title}. Auditions are open!`,
-      url,
-    };
-    if (navigator.share) {
-      try {
-        await navigator.share(shareData);
-      } catch {
-        /* user dismissed the share sheet */
+    // Canonical absolute public URL — never the raw href (which can carry
+    // stray query params) and NEXT_PUBLIC_SITE_URL-aware in deployed envs.
+    const url = publicShareUrl(`/auditions/${id}`);
+    const copyWithToast = async () => {
+      if (await copyText(url)) {
+        toast("success", "Link copied!");
+      } else {
+        toast("error", "Couldn't copy the link — you can copy it from the address bar.");
       }
-    } else {
-      await navigator.clipboard.writeText(url);
-      toast("success", "Link copied to clipboard!");
+    };
+    // Native share sheet only where it's the expected gesture (touch
+    // devices). On desktop, Share = copy the link, with visible feedback —
+    // predictable, and sidesteps flaky desktop share sheets.
+    const isTouchDevice =
+      typeof navigator !== "undefined" &&
+      /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+    if (isTouchDevice && typeof navigator.share === "function") {
+      try {
+        await navigator.share({
+          title: `${show!.title} — Auditions`,
+          text: `${show!.orgName} is casting ${show!.title}. Auditions are open!`,
+          url,
+        });
+        return;
+      } catch (e) {
+        // User dismissed the sheet → do nothing. Anything else → copy fallback.
+        if (e instanceof DOMException && e.name === "AbortError") return;
+      }
     }
+    await copyWithToast();
   }
 
   function handleAddToCalendar() {

@@ -8,6 +8,7 @@ import { useAuth } from "@/features/auth/AuthContext";
 import {
   getVolunteerBoard,
   claimVolunteerSlot,
+  isShiftPast,
 } from "@/lib/api/hub";
 import {
   Card,
@@ -165,7 +166,10 @@ export default function PublicVolunteerPage() {
     );
   }
 
-  const { show, needs } = board;
+  const { show } = board;
+  // Guests only ever see shifts that can still be claimed — past-dated
+  // shifts are hidden entirely on the public page (QC P1-7).
+  const needs = board.needs.filter((n) => !isShiftPast(n));
   const dates =
     show.showOpen && show.showClose
       ? `${formatDate(show.showOpen)} – ${formatDate(show.showClose)}`

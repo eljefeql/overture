@@ -15,8 +15,10 @@
 //      notifications row (rides the email pipeline); GUESTS (no account —
 //      approved gating exception) get a `guest_emails` queue row instead
 //      (migration 011; a notification can't target someone with no user_id).
-//   5. Guest email queue — sends pending guest_emails rows (confirmations
-//      enqueued by claim_volunteer_slot + the reminders above) via Resend.
+//   5. Guest email queue — sends pending guest_emails rows (volunteer
+//      confirmations enqueued by claim_volunteer_slot, the reminders above,
+//      and theatre-invite emails enqueued by notify_org_invite for invitees
+//      with no account — migration 020) via Resend.
 //      Without RESEND_API_KEY the rows stay 'pending' and are delivered
 //      automatically by the first run after the key is set.
 //
@@ -522,30 +524,72 @@ type GuestEmail = {
   body: string;
   show_title: string | null;
   cancel_token: string | null;
+  /** Template hint (migration 020): 'org_invite' | null (= volunteer style). */
+  kind?: string | null;
+  /** Relative CTA path (migration 020) — rendered as an absolute APP_URL link. */
+  link_url?: string | null;
 };
 
+/**
+ * Full HTML document with an explicit UTF-8 charset (same pattern as
+ * send-notification-email — without it mail clients guess the encoding and
+ * mangle accented characters). Two template branches:
+ *   - 'org_invite' (migration 020): warm theatre-invite with a signup CTA
+ *     button; no cancel link, no volunteer upsell.
+ *   - default: the volunteer confirmation/reminder (cancel link + account
+ *     upsell), unchanged in substance. Rows written before migration 020
+ *     simply have no kind/link_url and land here.
+ */
 function guestEmailHtml(e: GuestEmail): string {
+  const inner =
+    e.kind === "org_invite"
+      ? guestInviteInner(e)
+      : guestVolunteerInner(e);
+  return `<!DOCTYPE html>
+  <html lang="en">
+  <head><meta charset="utf-8"></head>
+  <body style="margin: 0;">
+  <div style="font-family: Georgia, serif; max-width: 560px; margin: 0 auto; padding: 24px;">
+    <h1 style="color: #3d2645; font-size: 22px; margin-bottom: 4px;">${e.subject}</h1>
+    ${e.show_title ? `<p style="color: #8a7968; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; margin-top: 0;">${e.show_title}</p>` : ""}
+    <p style="color: #2b2b2b; font-size: 16px; line-height: 1.5;">${e.body}</p>
+    ${inner}
+  </div>
+  </body>
+  </html>`;
+}
+
+function guestInviteInner(e: GuestEmail): string {
+  const ctaUrl = new URL(e.link_url ?? "/signup", APP_URL).toString();
+  return `
+    <a href="${ctaUrl}" style="display: inline-block; margin-top: 16px; background: #c9a227; color: #2b2030; text-decoration: none; padding: 10px 20px; border-radius: 10px; font-family: Helvetica, Arial, sans-serif; font-weight: 600; font-size: 14px;">
+      Join on Overture
+    </a>
+    <p style="color: #8a7968; font-size: 12px; margin-top: 28px;">
+      You're receiving this because someone invited this email address to
+      their theatre on Overture. If that's not you, you can safely ignore it.
+    </p>`;
+}
+
+function guestVolunteerInner(e: GuestEmail): string {
   const cancelUrl = e.cancel_token
     ? new URL(`/volunteer/cancel/${e.cancel_token}`, APP_URL).toString()
     : null;
   const signupUrl = new URL("/signup", APP_URL).toString();
   return `
-  <div style="font-family: Georgia, serif; max-width: 560px; margin: 0 auto; padding: 24px;">
-    <h1 style="color: #3d2645; font-size: 22px; margin-bottom: 4px;">${e.subject}</h1>
-    ${e.show_title ? `<p style="color: #8a7968; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; margin-top: 0;">${e.show_title}</p>` : ""}
-    <p style="color: #2b2b2b; font-size: 16px; line-height: 1.5;">${e.body}</p>
     ${cancelUrl ? `<p style="color: #8a7968; font-size: 13px; margin-top: 20px;">Plans changed? No hard feelings — <a href="${cancelUrl}" style="color: #3d2645;">give up your spot</a> so someone else can step in.</p>` : ""}
     <p style="color: #8a7968; font-size: 12px; margin-top: 28px;">
       Want to track your signups and hear when the theatre needs help?
       <a href="${signupUrl}" style="color: #3d2645;">Create a free Overture account</a>.
-    </p>
-  </div>`;
+    </p>`;
 }
 
 async function processGuestEmails(supabase: SupabaseClient): Promise<number> {
+  // select(*) so the new migration-020 columns (kind, link_url) come along
+  // when they exist and the query still works before the paste.
   const { data: pending, error } = await supabase
     .from("guest_emails")
-    .select("id, to_email, to_name, subject, body, show_title, cancel_token")
+    .select("*")
     .eq("status", "pending")
     .order("created_at")
     .limit(50);

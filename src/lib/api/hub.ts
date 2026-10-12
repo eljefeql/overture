@@ -10,6 +10,7 @@ import {
   getShow,
   getShowRoles,
   getShowTeam,
+  getShowAccess,
   getCastAssignments,
   getShowConflicts,
 } from "@/lib/api/client";
@@ -809,6 +810,43 @@ export type HubData = {
   conflicts: ShowConflictEntry[];
 };
 
+/**
+ * Is this announcement addressed to the viewer? Mirrors announce_to_show's
+ * recipient resolution (and migration 019's is_announcement_recipient):
+ * company → anyone with hub access · cast → accepted cast · principals →
+ * accepted cast in lead/supporting roles · crew → team · rehearsal →
+ * the rehearsal call's called set (deleted rehearsal falls back to company).
+ */
+function isAnnouncementForViewer(
+  a: Announcement,
+  userId: ID,
+  cast: CastAssignment[],
+  team: ShowTeamMember[],
+  roles: ShowRole[],
+  rehearsals: Rehearsal[]
+): boolean {
+  if (a.audience === "rehearsal") {
+    const rehearsal = a.rehearsalId
+      ? rehearsals.find((r) => r.id === a.rehearsalId)
+      : undefined;
+    if (rehearsal) {
+      return resolveCalledUserIds(rehearsal, cast, team, roles).has(userId);
+    }
+    // Rehearsal deleted (SET NULL) — same fallback as the fan-out: company.
+    return true;
+  }
+  if (a.audience === "company") return true; // viewer already passed the hub gate
+  const onTeam = team.some((t) => t.userId === userId);
+  if (a.audience === "crew") return onTeam;
+  const myAccepted = cast.filter((c) => c.actorId === userId);
+  if (a.audience === "cast") return myAccepted.length > 0;
+  // principals = accepted cast in lead/supporting roles
+  const roleTypeById = new Map(roles.map((r) => [r.id, r.roleType]));
+  return myAccepted.some((c) =>
+    PRINCIPAL_ROLE_TYPES.has(roleTypeById.get(c.roleId) ?? "")
+  );
+}
+
 export async function getHubData(
   showId: string,
   userId: string
@@ -823,6 +861,7 @@ export async function getHubData(
     announcementList,
     norms,
     conflicts,
+    isManager,
   ] = await Promise.all([
     getShow(showId),
     getShowRoles(showId),
@@ -833,15 +872,28 @@ export async function getHubData(
     getAnnouncements(showId, userId),
     getCommNorms(showId),
     getShowConflicts(showId),
+    // Team / org admin (real mock branch too) — managers see every
+    // announcement with its audience label; everyone else only their own.
+    getShowAccess(showId, userId).catch(() => false),
   ]);
+  const cast = assignments.filter((a) => a.status === "accepted");
+  // Targeted-announcement display (QC P1-6): the fan-out already targets
+  // correctly; filter the hub READ the same way for non-managers. Migration
+  // 019 enforces this at the RLS level too — this keeps mock mode and the
+  // pre-paste window honest.
+  const announcements = isManager
+    ? announcementList
+    : announcementList.filter((a) =>
+        isAnnouncementForViewer(a, userId, cast, team, roles, rehearsalList)
+      );
   return {
     show,
     roles,
     team,
-    cast: assignments.filter((a) => a.status === "accepted"),
+    cast,
     rehearsals: rehearsalList,
     absences,
-    announcements: announcementList,
+    announcements,
     commNorms: norms,
     conflicts,
   };
@@ -872,6 +924,27 @@ export function nameForUser(
    RPC (anon-safe, capacity-checked). This is the approved
    exception to the access-gating rule.
    ============================================================ */
+
+/**
+ * Has this shift already happened? Over once its end time (or start time,
+ * when no end) has passed; date-only needs are past once the viewer's local
+ * date is beyond the event date. Mirrors migration 019's RPC guard.
+ */
+export function isShiftPast(n: {
+  eventDate: string | null;
+  startTime: string | null;
+  endTime: string | null;
+}): boolean {
+  const now = new Date();
+  if (n.endTime) return new Date(n.endTime).getTime() < now.getTime();
+  if (n.startTime) return new Date(n.startTime).getTime() < now.getTime();
+  if (n.eventDate) {
+    const pad = (x: number) => String(x).padStart(2, "0");
+    const todayLocal = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    return n.eventDate < todayLocal;
+  }
+  return false;
+}
 
 function mockNeedToVolunteerNeed(n: MockVolunteerNeed): VolunteerNeed {
   return {
@@ -1070,6 +1143,9 @@ export async function claimVolunteerSlot(input: {
   await delay(300);
   const need = mockVolunteerNeeds.find((n) => n.id === input.needId);
   if (!need) throw new Error("This volunteer need no longer exists.");
+  if (isShiftPast(need)) {
+    throw new Error("This shift has already happened — thank you anyway!");
+  }
   const confirmed = mockVolunteerSignups.filter(
     (s) => s.needId === input.needId && s.status === "confirmed"
   );

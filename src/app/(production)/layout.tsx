@@ -12,7 +12,7 @@ import { useOrg } from "@/features/auth/useOrg";
 import { AuthGuard } from "@/features/auth/AuthGuard";
 import { ProductionTopNav } from "@/components/ui/ProductionTopNav";
 import { ProductionSubNav } from "@/components/ui/ProductionSubNav";
-import { Button, EmptyState, PageSkeleton } from "@/components/ui";
+import { Button, EmptyState, Nav, PageSkeleton } from "@/components/ui";
 import { Buildings, LockSimple } from "@phosphor-icons/react";
 
 /* ============================================================
@@ -75,6 +75,21 @@ export default function ProductionLayout({
     enabled: isSupabaseConfigured && !!showId && !!user,
   });
 
+  // Chrome check for the hub (QC P1-2): a cast member has HUB access but is
+  // NOT team / org admin — they should experience the Hub as an actor page
+  // reached from My Shows (actor Nav), never the production toolbar
+  // (Setup/Auditions/…/"My Theatre" tabs that would all dead-end for them).
+  // getShowAccess has a real mock branch, so this runs in BOTH modes — mock
+  // team personas keep production chrome. Non-hub routes never run it.
+  const { data: canManageShow, isLoading: chromeLoading } = useQuery({
+    queryKey: ["showChromeAccess", showId, user?.id],
+    queryFn: () => getShowAccess(showId!, user!.id),
+    enabled: isHubRoute && !!showId && !!user,
+  });
+  // Until the check resolves, show NO chrome (no production-toolbar flash).
+  const chromeUnknown = isHubRoute && (!user || chromeLoading);
+  const actorChrome = isHubRoute && !chromeUnknown && canManageShow === false;
+
   let content = children;
   if (isSupabaseConfigured && user) {
     const checking = showId ? accessLoading : orgLoading;
@@ -119,17 +134,23 @@ export default function ProductionLayout({
 
   return (
     <AuthGuard>
-      <ProductionTopNav
-        currentShowId={showId ?? undefined}
-        currentShowTitle={show?.title}
-      />
-      {showId && (
-        <ProductionSubNav
-          showId={showId}
-          showStatus={show?.status}
-        />
+      {chromeUnknown ? null : actorChrome ? (
+        <Nav />
+      ) : (
+        <>
+          <ProductionTopNav
+            currentShowId={showId ?? undefined}
+            currentShowTitle={show?.title}
+          />
+          {showId && (
+            <ProductionSubNav
+              showId={showId}
+              showStatus={show?.status}
+            />
+          )}
+        </>
       )}
-      <main className="flex-1">{content}</main>
+      <main className="flex-1">{chromeUnknown ? <PageSkeleton /> : content}</main>
     </AuthGuard>
   );
 }

@@ -27,6 +27,7 @@ import {
   deleteVolunteerNeed,
   claimVolunteerSlot,
   unclaimVolunteerSlot,
+  isShiftPast,
   resolveCalledUserIds,
   calledLabel,
   nameForUser,
@@ -83,6 +84,9 @@ import {
   HandHeart,
   LinkSimple,
   CheckCircle,
+  CaretDown,
+  CaretUp,
+  ClockCounterClockwise,
 } from "@phosphor-icons/react";
 import type {
   ID,
@@ -1719,6 +1723,7 @@ function VolunteersSection({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<VolunteerDraft>(EMPTY_VOLUNTEER_DRAFT);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [pastOpen, setPastOpen] = useState(false);
 
   const { data: needs, isLoading } = useQuery({
     queryKey: ["hubVolunteers", showId],
@@ -1844,7 +1849,108 @@ function VolunteersSection({
     setModalOpen(true);
   };
 
-  const list = needs ?? [];
+  // Past shifts stay visible (who helped) but collapsed and never claimable.
+  const allNeeds = needs ?? [];
+  const list = allNeeds.filter((n) => !isShiftPast(n));
+  const pastList = allNeeds.filter((n) => isShiftPast(n));
+
+  const renderNeed = (need: VolunteerNeed, isPast: boolean) => {
+    const filled = need.signups.length;
+    const isFull = filled >= need.slots;
+    const mine = need.signups.find((s) => s.userId === userId);
+    const when = shiftWhen(need);
+    return (
+      <Card key={need.id} variant="elevated" padding="standard">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-sm font-semibold text-curtain-900">{need.label}</p>
+              {isPast ? (
+                <Badge size="sm">Past</Badge>
+              ) : isFull ? (
+                <Badge variant="success" size="sm">Full</Badge>
+              ) : (
+                <Badge variant="warning" size="sm">
+                  {need.slots - filled} open
+                </Badge>
+              )}
+            </div>
+            {when && (
+              <p className="text-xs text-clay-500 flex items-center gap-1.5 mt-1">
+                <Calendar className="w-3.5 h-3.5 text-stage-500" weight="duotone" />
+                {when}
+              </p>
+            )}
+            {need.notes && (
+              <p className="text-xs text-clay-500 mt-1">{need.notes}</p>
+            )}
+            <p className="text-xs font-medium text-curtain-700 mt-2">
+              {filled} of {need.slots} filled
+            </p>
+            {need.signups.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                {need.signups.map((s) => (
+                  <Pill key={s.id} variant="status" className="cursor-default">
+                    {s.name}
+                    {s.isGuest && (
+                      <span className="ml-1.5 text-[10px] font-semibold text-clay-400 uppercase tracking-wide">
+                        guest
+                      </span>
+                    )}
+                  </Pill>
+                ))}
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              {isPast ? (
+                <span className="text-xs text-clay-400">
+                  This shift has passed{mine ? " — thank you for helping!" : "."}
+                </span>
+              ) : mine ? (
+                <>
+                  <span className="text-xs font-semibold text-forest-600 flex items-center gap-1">
+                    <CheckCircle className="w-4 h-4" weight="duotone" />
+                    You&apos;re signed up
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => unclaimMutation.mutate(need.id)}
+                    loading={unclaimMutation.isPending && unclaimMutation.variables === need.id}
+                  >
+                    Give up my spot
+                  </Button>
+                </>
+              ) : isFull ? (
+                <span className="text-xs text-clay-400">
+                  All spots are taken — thank you, everyone!
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => claimMutation.mutate(need.id)}
+                  loading={claimMutation.isPending && claimMutation.variables === need.id}
+                  icon={<HandHeart className="w-4 h-4 text-stage-500" weight="duotone" />}
+                >
+                  Claim a spot
+                </Button>
+              )}
+            </div>
+          </div>
+          {isTeam && (
+            <button
+              onClick={() => openEdit(need)}
+              className="text-clay-300 hover:text-stage-500 transition p-1 flex-shrink-0"
+              aria-label={`Edit ${need.label}`}
+            >
+              <PencilSimple className="w-4 h-4" weight="bold" />
+            </button>
+          )}
+        </div>
+      </Card>
+    );
+  };
 
   return (
     <section>
@@ -1889,7 +1995,7 @@ function VolunteersSection({
         <Card variant="flat" padding="standard">
           <p className="text-sm text-clay-500">Loading volunteer needs…</p>
         </Card>
-      ) : list.length === 0 ? (
+      ) : allNeeds.length === 0 ? (
         <Card variant="flat" padding="standard">
           <div className="flex items-center gap-3">
             <HandHeart className="w-6 h-6 text-stage-500 flex-shrink-0" weight="duotone" />
@@ -1902,97 +2008,41 @@ function VolunteersSection({
         </Card>
       ) : (
         <div className="flex flex-col gap-3">
-          {list.map((need) => {
-            const filled = need.signups.length;
-            const isFull = filled >= need.slots;
-            const mine = need.signups.find((s) => s.userId === userId);
-            const when = shiftWhen(need);
-            return (
-              <Card key={need.id} variant="elevated" padding="standard">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-semibold text-curtain-900">{need.label}</p>
-                      {isFull ? (
-                        <Badge variant="success" size="sm">Full</Badge>
-                      ) : (
-                        <Badge variant="warning" size="sm">
-                          {need.slots - filled} open
-                        </Badge>
-                      )}
-                    </div>
-                    {when && (
-                      <p className="text-xs text-clay-500 flex items-center gap-1.5 mt-1">
-                        <Calendar className="w-3.5 h-3.5 text-stage-500" weight="duotone" />
-                        {when}
-                      </p>
-                    )}
-                    {need.notes && (
-                      <p className="text-xs text-clay-500 mt-1">{need.notes}</p>
-                    )}
-                    <p className="text-xs font-medium text-curtain-700 mt-2">
-                      {filled} of {need.slots} filled
-                    </p>
-                    {need.signups.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                        {need.signups.map((s) => (
-                          <Pill key={s.id} variant="status" className="cursor-default">
-                            {s.name}
-                            {s.isGuest && (
-                              <span className="ml-1.5 text-[10px] font-semibold text-clay-400 uppercase tracking-wide">
-                                guest
-                              </span>
-                            )}
-                          </Pill>
-                        ))}
-                      </div>
-                    )}
-                    <div className="flex flex-wrap items-center gap-2 mt-3">
-                      {mine ? (
-                        <>
-                          <span className="text-xs font-semibold text-forest-600 flex items-center gap-1">
-                            <CheckCircle className="w-4 h-4" weight="duotone" />
-                            You&apos;re signed up
-                          </span>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => unclaimMutation.mutate(need.id)}
-                            loading={unclaimMutation.isPending && unclaimMutation.variables === need.id}
-                          >
-                            Give up my spot
-                          </Button>
-                        </>
-                      ) : isFull ? (
-                        <span className="text-xs text-clay-400">
-                          All spots are taken — thank you, everyone!
-                        </span>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => claimMutation.mutate(need.id)}
-                          loading={claimMutation.isPending && claimMutation.variables === need.id}
-                          icon={<HandHeart className="w-4 h-4 text-stage-500" weight="duotone" />}
-                        >
-                          Claim a spot
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                  {isTeam && (
-                    <button
-                      onClick={() => openEdit(need)}
-                      className="text-clay-300 hover:text-stage-500 transition p-1 flex-shrink-0"
-                      aria-label={`Edit ${need.label}`}
-                    >
-                      <PencilSimple className="w-4 h-4" weight="bold" />
-                    </button>
-                  )}
+          {list.length === 0 && (
+            <Card variant="flat" padding="standard">
+              <div className="flex items-center gap-3">
+                <HandHeart className="w-6 h-6 text-stage-500 flex-shrink-0" weight="duotone" />
+                <p className="text-sm text-clay-500">
+                  {isTeam
+                    ? "No upcoming volunteer needs — add the next one when it's planned."
+                    : "No upcoming volunteer needs right now."}
+                </p>
+              </div>
+            </Card>
+          )}
+          {list.map((need) => renderNeed(need, false))}
+          {pastList.length > 0 && (
+            <div>
+              <button
+                onClick={() => setPastOpen((o) => !o)}
+                className="flex items-center gap-1.5 text-xs font-semibold text-clay-500 hover:text-curtain-700 transition py-1"
+                aria-expanded={pastOpen}
+              >
+                <ClockCounterClockwise className="w-4 h-4 text-stage-500" weight="duotone" />
+                Past shifts ({pastList.length})
+                {pastOpen ? (
+                  <CaretUp className="w-3.5 h-3.5" weight="bold" />
+                ) : (
+                  <CaretDown className="w-3.5 h-3.5" weight="bold" />
+                )}
+              </button>
+              {pastOpen && (
+                <div className="flex flex-col gap-3 mt-2">
+                  {pastList.map((need) => renderNeed(need, true))}
                 </div>
-              </Card>
-            );
-          })}
+              )}
+            </div>
+          )}
         </div>
       )}
 

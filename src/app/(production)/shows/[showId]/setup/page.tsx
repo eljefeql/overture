@@ -41,6 +41,7 @@ import {
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/features/auth/AuthContext";
 import { formatDate, formatTime, formatTeamRole, formatRoleGender, groupBlocksByDay } from "@/lib/utils";
+import { publicShareUrl, copyText } from "@/lib/share";
 import {
   PencilSimple,
   Plus,
@@ -615,14 +616,11 @@ export default function ShowSetupPage() {
     });
   };
 
-  const publicAuditionUrl =
-    typeof window !== "undefined" ? `${window.location.origin}/auditions/${showId}` : `/auditions/${showId}`;
-
   const copyPublicLink = async () => {
-    try {
-      await navigator.clipboard.writeText(publicAuditionUrl);
+    const publicAuditionUrl = publicShareUrl(`/auditions/${showId}`);
+    if (await copyText(publicAuditionUrl)) {
       toast("success", "Public link copied to clipboard!");
-    } catch {
+    } else {
       toast("error", "Couldn't copy — try again.");
     }
   };

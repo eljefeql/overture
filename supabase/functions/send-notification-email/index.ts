@@ -27,7 +27,11 @@ type NotificationRecord = {
   link_url: string | null;
   is_read: boolean;
   created_at: string;
-  /** Email-gating hint (migration 012): 'reminders' | 'announcements' | 'offers' | null. */
+  /**
+   * Email-gating hint (migrations 012/020):
+   * 'reminders' | 'announcements' | 'offers' (prefs-gated) |
+   * 'in_app' (never emailed) | null (always emailed).
+   */
   category?: string | null;
 };
 
@@ -139,9 +143,19 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ status: "failed", error: reason }), { status: 200 });
   }
 
+  // Category 'in_app' (migration 020) means the sender explicitly wants NO
+  // email — e.g. an announcement composed with "also email" unchecked.
+  const category = categoryOf(notification);
+  if (category === "in_app") {
+    console.log(`Notification ${notification.id} skipped — in-app only`);
+    await logDelivery("skipped", "Sender marked in-app only");
+    return new Response(JSON.stringify({ status: "skipped", reason: "in_app" }), {
+      status: 200,
+    });
+  }
+
   // Respect the recipient's per-category email toggles. The in-app
   // notification already exists — we're only skipping the email.
-  const category = categoryOf(notification);
   if (!emailAllowed(profile.notification_prefs, category)) {
     console.log(
       `Notification ${notification.id} skipped — recipient turned off '${category}' emails`

@@ -44,6 +44,7 @@ import { useAuth } from "@/features/auth/AuthContext";
 import { useOrg } from "@/features/auth/useOrg";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { formatTime, formatHeight, formatDate, formatConflictText } from "@/lib/utils";
+import { publicShareUrl, copyText } from "@/lib/share";
 import {
   MagnifyingGlass,
   ArrowSquareOut,
@@ -231,16 +232,11 @@ export default function AuditionsPage() {
 
   // Same public-page share affordances as the setup page — owners asked for
   // a way to share the audition page from here too.
-  const publicAuditionUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/auditions/${showId}`
-      : `/auditions/${showId}`;
-
   const copyPublicLink = async () => {
-    try {
-      await navigator.clipboard.writeText(publicAuditionUrl);
+    const publicAuditionUrl = publicShareUrl(`/auditions/${showId}`);
+    if (await copyText(publicAuditionUrl)) {
       toast("success", "Public link copied to clipboard!");
-    } catch {
+    } else {
       toast("error", "Couldn't copy — try again.");
     }
   };

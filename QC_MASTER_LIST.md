@@ -7,13 +7,13 @@ findings (3), Fiddler population findings (2), carried infrastructure. Status mo
 
 | # | Item | Notes |
 |---|---|---|
-| 1 | Cast members see only themselves in Hub "People" (Cast (1)) | RLS: actors read own cast_assignments only. Migration 019: production members read accepted assignments on cast/published shows. CONFIRMED at DB level. |
-| 2 | Cast members get the full production toolbar on the Hub | Non-team production members need actor-appropriate chrome: no Setup/Auditions/Casting/Offers tabs, no "My Theatre". |
+| 1 | Cast members see only themselves in Hub "People" (Cast (1)) | **BUILT 2026-10-12, needs migration 019 paste.** New additive SELECT policy on cast_assignments: production members read ACCEPTED rows on shows with status cast/archived (the honest publish signal — publishCastList flips status). Pre-paste degrades exactly as today. |
+| 2 | Cast members get the full production toolbar on the Hub | **FIXED 2026-10-12 (live-verified).** (production) layout: on hub routes, a getShowAccess chrome check (both modes) renders the actor `Nav` for hub-only viewers, production chrome for team/org admins; no chrome until the check resolves (no toolbar flash). |
 | 3 | Theatre member invites never email the invitee | Owner-ordered. Build real invite emails through Resend (guest_emails queue or direct edge fn call on invite insert). Covers "hook all flows to Resend" for the invite path. |
 | 4 | Resend audit — every notification-producing flow actually emails | Audit each create_notification/announce path + confirm webhook coverage; fix gaps. (Known good: offers, callbacks, announcements, reminders, guest volunteer.) |
 | 5 | Share button on audition page → real shareable link | Investigate: which surface has the dead/unclear share; ensure copyable public URL everywhere. |
-| 6 | Principals-targeted announcements display to everyone | Fan-out is targeted; display may not filter. Check hub read query. |
-| 7 | Past-dated volunteer shifts still render claimable | File under "Past shifts" or hide; stop claims on past dates. |
+| 6 | Principals-targeted announcements display to everyone | **FIXED 2026-10-12 (live-verified app-side; RLS half in 019).** getHubData filters announcements for non-managers by the same audience resolution as the fan-out; migration 019 adds is_announcement_recipient() + replaces announcements_member_read so the DB agrees. Managers keep seeing all with labels + receipts. |
+| 7 | Past-dated volunteer shifts still render claimable | **FIXED 2026-10-12 (live-verified app-side; RPC half in 019).** Hub board: past shifts collapsed under "Past shifts (N)", never claimable; public /volunteer page hides them entirely; mock claim + migration 019's claim_volunteer_slot both reject past-shift claims. |
 
 ## P2 — Workflow gaps (owner-felt friction, this week)
 
@@ -55,6 +55,11 @@ findings (3), Fiddler population findings (2), carried infrastructure. Status mo
 - Pre-loaded shows DB (Concord/MTI) — content project.
 - Supabase custom auth domain (paid) — when Stripe turns on.
 - Email digest (spec'd).
+
+## New candidates (found during P1, untriaged)
+
+- Cast-list page Share button copies the TEAM-GATED production URL — recipients without access hit a lock screen. Should share the public cast list (or be removed until one exists).
+- Director muting "Offers" emails also mutes actor-response notifications to them (same category). Defensible; revisit if directors complain.
 
 ## QA-data tasks (not code)
 
