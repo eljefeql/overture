@@ -1,4 +1,4 @@
-# QC Master List — the week to "perfect" (compiled 2026-10-10)
+# QC Master List — the week to "perfect" (compiled 2026-10-10, batch 3 added 2026-10-12)
 
 One list to rule the hardening week. Sources: owner deep-QC batch 2 (19 items), hub walkthrough
 findings (3), Fiddler population findings (2), carried infrastructure. Status moves here as work lands.
@@ -31,6 +31,11 @@ findings (3), Fiddler population findings (2), carried infrastructure. Status mo
 | 17 | Rehearsal add/edit: surface conflicts | Show known cast conflicts (signup_conflicts) + existing absences for the chosen date while scheduling. |
 | 18 | Declined offers vanish from history when refilled | From population run: refill forces declined→withdrawn; tracker loses the decline. Keep history (status or audit trail). |
 | 19 | Post-publish offers path | Adding a cast member after publish works via API; make the UI path intentional (ties into #12). |
+| 24 | Theatre affiliations (EMACT, AACT…) | Chips on org edit + public theatre page. Small; text/multi-select, no directory integration needed. |
+| 25 | Editable offer agreements | The terms an actor agrees to when accepting a role are currently fixed copy in the offer flow — make them show-level editable (setup section, sensible defaults preserved) so each theatre/director sets their own. |
+| 26 | Duplicate-theatre protection (minimal) | At maker onboarding: name-similarity check → "A theatre named X already exists in CityName — is it yours?" with a request-to-join nudge instead of silent duplicate creation. Full claim flow stays parked (P4). |
+| 27 | **Modular adoption: "Have you already cast this show?"** | At show creation, ask which parts they want: team recruiting / casting / hub only. Already-cast shows skip auditions entirely: director bulk-adds cast members (name+email, invite rides the new invite-email pipeline) straight into the Hub. STRATEGIC — the churn-killer for theatres scared of switching mid-season. NEEDS DESIGN PASS first (pairs with #12 supplemental calls). |
+| 28 | Platform admin, minimal slice | `platform_admin` flag on Chris's account → /admin: read-only directory of all theatres/users/shows, dupe spotting. Password resets: already available in the Supabase dashboard today (Auth → user → ⋯ → Send password recovery) — document, don't rebuild. Merge tools are P4. |
 
 ## P3 — Decisions needed from Chris before building
 
@@ -44,6 +49,9 @@ findings (3), Fiddler population findings (2), carried infrastructure. Status mo
 ## P4 — Parked (explicitly later)
 
 - Postings/search beyond auditions = Staff Calls (TALENT_DISCOVERY_SPEC.md, fast-follow) — owner re-raised; first post-week item with the email digest.
+- **Pre-loaded US community theatre directory** — major initiative, owner-raised 2026-10-12: discover + pre-load theatres as unclaimed pages. Phase 1 wedge: EMACT member directory (~100 Massachusetts theatres — the Boston supply play), then AACT. Depends on the claim flow. Pairs with #26.
+- Full duplicate-theatre claim/request-to-join flow (Sprint D Phase 3).
+- Full god-mode admin: merge duplicate theatres/actors, cross-org edits, impersonation. (Minimal read slice is #28.)
 - Pre-loaded shows DB (Concord/MTI) — content project.
 - Supabase custom auth domain (paid) — when Stripe turns on.
 - Email digest (spec'd).
@@ -52,6 +60,7 @@ findings (3), Fiddler population findings (2), carried infrastructure. Status mo
 
 - Fresh show in `auditions_open` WITH signups so shortlist→callback flow is testable (all current staging shows are past it). Horde script exists.
 - Fiddler is the fully-cast Hub specimen (done 2026-10-09). "Can't see a show hub" is RESOLVED — Fiddler, as Christopher (Director) or any qa.actor cast member.
+- **Demo/tutorial theatre** (owner, 2026-10-12): a polished fake theatre + people + shows for recording tutorials. Recommend building it on STAGING (zero prod pollution, QA accounts already exist to populate it); record against localhost/staging. If tutorials must show the prod URL, revisit with a clearly-named demo org we can wipe.
 
 ## Carried infrastructure checklist (owner)
 
