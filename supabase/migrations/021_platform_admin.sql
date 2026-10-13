@@ -83,8 +83,11 @@ AS $$
   );
 $$;
 
-REVOKE ALL ON FUNCTION public.is_platform_admin() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.is_platform_admin() TO authenticated;
+REVOKE ALL ON FUNCTION public.is_platform_admin() FROM PUBLIC;
+-- anon MUST keep EXECUTE: this function is referenced inside read policies on
+-- public tables (shows, org_members), so revoking it from anon breaks every
+-- anonymous read with 42501. For anon auth.uid() is null -> always false.
+GRANT EXECUTE ON FUNCTION public.is_platform_admin() TO anon, authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 3. Admin READ policies (additive — never replace existing ones)
