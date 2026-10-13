@@ -60,6 +60,7 @@ import {
   CaretUp,
   Scales,
   ArrowRight,
+  ArrowSquareOut,
   UsersThree,
 } from "@phosphor-icons/react";
 import Link from "next/link";
@@ -896,11 +897,20 @@ export default function CastingBoardPage() {
                           openActorPanel(c.actorId, showId);
                         }}
                         className="p-1.5 rounded-lg text-clay-500 hover:text-curtain-900 hover:bg-cream-100 transition flex-shrink-0"
-                        title="View profile"
-                        aria-label="View profile"
+                        title="Quick view"
+                        aria-label="Quick view"
                       >
                         <Eye className="w-4 h-4" weight="duotone" />
                       </button>
+                      <Link
+                        href={`/actors/${c.actorId}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="p-1.5 rounded-lg text-clay-500 hover:text-curtain-900 hover:bg-cream-100 transition flex-shrink-0"
+                        title={`Open ${c.actorName}'s full profile`}
+                        aria-label={`Open ${c.actorName}'s full profile`}
+                      >
+                        <ArrowSquareOut className="w-4 h-4" weight="duotone" />
+                      </Link>
                     </div>
                   );
                 })}

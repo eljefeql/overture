@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Modal, Input, Textarea, Button, useToast } from "@/components/ui";
 import { updateActorProfile, updateActorUser } from "@/lib/api/client";
+import { DanceStylesField } from "@/components/profile/DanceStylesField";
 import { FloppyDisk, Plus, X } from "@phosphor-icons/react";
 import type { ActorWithProfile, ActorProfile, Pronouns, ActorMeasurements, BucketListShow } from "@/types";
 
@@ -50,7 +51,7 @@ export function ProfileEditModal({ actor, open, onClose, initialTab = "basic" }:
   const [ageRangeHigh, setAgeRangeHigh] = useState(profile?.ageRangeHigh?.toString() ?? "");
   const [heightInches, setHeightInches] = useState(profile?.heightInches?.toString() ?? "");
   const [vocalRange, setVocalRange] = useState(profile?.vocalRange ?? "");
-  const [danceStyles, setDanceStyles] = useState(profile?.danceStyles?.join(", ") ?? "");
+  const [danceStyles, setDanceStyles] = useState<string[]>(profile?.danceStyles ?? []);
   const [specialSkills, setSpecialSkills] = useState(profile?.specialSkills?.join(", ") ?? "");
   const [locationCity, setLocationCity] = useState(profile?.locationCity ?? "");
   const [locationState, setLocationState] = useState(profile?.locationState ?? "");
@@ -98,7 +99,7 @@ export function ProfileEditModal({ actor, open, onClose, initialTab = "basic" }:
     setAgeRangeHigh(profile?.ageRangeHigh?.toString() ?? "");
     setHeightInches(profile?.heightInches?.toString() ?? "");
     setVocalRange(profile?.vocalRange ?? "");
-    setDanceStyles(profile?.danceStyles?.join(", ") ?? "");
+    setDanceStyles(profile?.danceStyles ?? []);
     setSpecialSkills(profile?.specialSkills?.join(", ") ?? "");
     setLocationCity(profile?.locationCity ?? "");
     setLocationState(profile?.locationState ?? "");
@@ -174,7 +175,7 @@ export function ProfileEditModal({ actor, open, onClose, initialTab = "basic" }:
         ageRangeHigh: num(ageRangeHigh) as number | null,
         heightInches: num(heightInches) as number | null,
         vocalRange: vocalRange || null,
-        danceStyles: csvToArray(danceStyles),
+        danceStyles,
         specialSkills: csvToArray(specialSkills),
         locationCity: locationCity || null,
         locationState: locationState || null,
@@ -290,12 +291,7 @@ export function ProfileEditModal({ actor, open, onClose, initialTab = "basic" }:
             onChange={(e) => setVocalRange(e.target.value)}
             placeholder="e.g. Mezzo A3-C6"
           />
-          <Input
-            label="Dance Styles"
-            value={danceStyles}
-            onChange={(e) => setDanceStyles(e.target.value)}
-            placeholder="Comma separated: Ballet, Jazz"
-          />
+          <DanceStylesField value={danceStyles} onChange={setDanceStyles} />
           <Input
             label="Special Skills"
             value={specialSkills}

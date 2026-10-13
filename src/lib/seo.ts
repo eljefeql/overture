@@ -91,17 +91,29 @@ export type OpenAuditionCard = {
 export async function getOpenAuditionCards(): Promise<OpenAuditionCard[]> {
   if (!isConfigured) return [];
   try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/shows?status=eq.auditions_open&select=id,title,show_type,audition_start,city,state,orgs(name)&order=audition_start.asc.nullslast&limit=4`,
-      {
-        headers: {
-          apikey: SUPABASE_ANON_KEY!,
-          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-        },
-        signal: AbortSignal.timeout(3000),
-        next: { revalidate: 300 },
-      }
+    // Richer select carries the org's archived flag (migration 021) so
+    // archived theatres never surface on the landing strip; pre-021 the
+    // column doesn't exist, so fall back to the original select.
+    const fetchCards = (select: string) =>
+      fetch(
+        `${SUPABASE_URL}/rest/v1/shows?status=eq.auditions_open&select=${select}&order=audition_start.asc.nullslast&limit=4`,
+        {
+          headers: {
+            apikey: SUPABASE_ANON_KEY!,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+          signal: AbortSignal.timeout(3000),
+          next: { revalidate: 300 },
+        }
+      );
+    let res = await fetchCards(
+      "id,title,show_type,audition_start,city,state,orgs(name,is_archived)"
     );
+    if (!res.ok) {
+      res = await fetchCards(
+        "id,title,show_type,audition_start,city,state,orgs(name)"
+      );
+    }
     if (!res.ok) return [];
     const rows = (await res.json()) as Array<{
       id: string;
@@ -110,10 +122,10 @@ export async function getOpenAuditionCards(): Promise<OpenAuditionCard[]> {
       audition_start: string | null;
       city: string | null;
       state: string | null;
-      orgs: { name: string } | null;
+      orgs: { name: string; is_archived?: boolean } | null;
     }>;
     if (!Array.isArray(rows)) return [];
-    return rows.map((r) => ({
+    return rows.filter((r) => !r.orgs?.is_archived).map((r) => ({
       id: r.id,
       title: r.title,
       showType: r.show_type,
@@ -137,10 +149,14 @@ export async function getOpenShowIds(): Promise<string[]> {
   return rows?.map((r) => r.id) ?? [];
 }
 
-/** All theatre orgs — public theatre pages are anon-viewable. */
+/** All theatre orgs — public theatre pages are anon-viewable. Archived
+ *  theatres (migration 021) stay out of the sitemap; pre-021 the column
+ *  doesn't exist, so fall back to the unfiltered read. */
 export async function getOrgIds(): Promise<string[]> {
-  const rows = await restFetch<Array<{ id: string }>>(
-    `orgs?select=id&limit=500`
-  );
+  const rows =
+    (await restFetch<Array<{ id: string }>>(
+      `orgs?select=id&is_archived=not.is.true&limit=500`
+    )) ??
+    (await restFetch<Array<{ id: string }>>(`orgs?select=id&limit=500`));
   return rows?.map((r) => r.id) ?? [];
 }

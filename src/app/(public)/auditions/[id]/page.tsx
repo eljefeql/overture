@@ -97,6 +97,9 @@ export default function AuditionDetailPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [showModal, setShowModal] = useState(false);
+  // Remembers an inline headshot upload from the signup modal this session —
+  // the auth context's avatarUrl only refreshes at next session restore.
+  const [headshotAdded, setHeadshotAdded] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
   const { data: show, isLoading: showLoading } = useQuery({
@@ -957,6 +960,9 @@ export default function AuditionDetailPage() {
           showClose={show.showClose ?? undefined}
           onSubmit={(data) => signupMutation.mutate(data)}
           isSubmitting={signupMutation.isPending}
+          actorUserId={user?.id}
+          hasHeadshot={!!user?.avatarUrl || headshotAdded}
+          onHeadshotUploaded={() => setHeadshotAdded(true)}
         />
       )}
 

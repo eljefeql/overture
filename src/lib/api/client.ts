@@ -60,6 +60,8 @@ function rowToOrg(r: any): Org {
     foundedYear: r.founded_year ?? null, mission: r.mission ?? null,
     facebookUrl: r.facebook_url ?? null, instagramUrl: r.instagram_url ?? null,
     ticketingUrl: r.ticketing_url ?? null,
+    affiliations: r.affiliations ?? [],
+    isArchived: r.is_archived ?? false,
     latitude: r.latitude ?? null, longitude: r.longitude ?? null,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
@@ -81,6 +83,8 @@ function rowToShow(r: any): Show {
     callbackContactPhone: r.callback_contact_phone,
     dayOfContactName: r.day_of_contact_name ?? null,
     dayOfContactInfo: r.day_of_contact_info ?? null,
+    // Pre-migration-022 rows have no column → null = "use defaults".
+    offerAgreements: Array.isArray(r.offer_agreements) ? r.offer_agreements : null,
     posterUrl: r.poster_url ?? null,
     city: r.city, state: r.state,
     distanceMiles: null, // computed client-side once geo lands
@@ -637,7 +641,7 @@ export async function getOrg(orgId: string): Promise<Org | null> {
 
 export async function updateOrg(
   orgId: string,
-  updates: Partial<Pick<Org, "name" | "description" | "city" | "state" | "websiteUrl" | "codeOfConduct" | "foundedYear" | "mission" | "facebookUrl" | "instagramUrl" | "ticketingUrl" | "logoUrl">>
+  updates: Partial<Pick<Org, "name" | "description" | "city" | "state" | "websiteUrl" | "codeOfConduct" | "foundedYear" | "mission" | "facebookUrl" | "instagramUrl" | "ticketingUrl" | "logoUrl" | "affiliations">>
 ): Promise<Org> {
   if (isSupabaseConfigured) {
     /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
@@ -654,6 +658,7 @@ export async function updateOrg(
     if (updates.facebookUrl !== undefined) row.facebook_url = updates.facebookUrl;
     if (updates.instagramUrl !== undefined) row.instagram_url = updates.instagramUrl;
     if (updates.ticketingUrl !== undefined) row.ticketing_url = updates.ticketingUrl;
+    if (updates.affiliations !== undefined) row.affiliations = updates.affiliations;
     // Geocode a changed city/state best-effort (migration 018). A failed
     // lookup returns null → no coordinate write; the save never blocks on it.
     if (updates.city !== undefined && updates.state !== undefined) {
@@ -670,6 +675,12 @@ export async function updateOrg(
     if (error && /latitude|longitude/.test(error.message)) {
       delete row.latitude;
       delete row.longitude;
+      ({ data, error } = await getSupabase()
+        .from("orgs").update(row).eq("id", orgId).select("*").maybeSingle());
+    }
+    // Pre-022 affiliations doesn't exist — same graceful retry.
+    if (error && /affiliations/.test(error.message)) {
+      delete row.affiliations;
       ({ data, error } = await getSupabase()
         .from("orgs").update(row).eq("id", orgId).select("*").maybeSingle());
     }
@@ -1466,6 +1477,11 @@ export type DiscoverFilters = {
  *  viewer has coordinates of their own, so Discover can compute real
  *  distances. Falls back to SHOW_SELECT pre-migration-018. */
 const GEO_SHOW_SELECT = "*, orgs(name, latitude, longitude)";
+/** Richer variants that also carry the org's archived flag (migration 021) so
+ *  public lists can exclude archived theatres — each falls back to the
+ *  pre-021 select on a missing-column error. */
+const ARCHIVED_SHOW_SELECT = "*, orgs(name, is_archived)";
+const ARCHIVED_GEO_SHOW_SELECT = "*, orgs(name, latitude, longitude, is_archived)";
 
 export async function getOpenAuditions(
   filters?: DiscoverFilters,
@@ -1479,23 +1495,28 @@ export async function getOpenAuditions(
     const supabase = getSupabase();
     /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
     let data: any[] | null = null;
-    if (viewer) {
-      // Pre-018 the org coordinate columns don't exist — a missing-column
-      // error falls through to the plain select (null distances).
-      const geoRes = await supabase
-        .from("shows").select(GEO_SHOW_SELECT).eq("status", "auditions_open");
-      if (!geoRes.error) {
-        data = geoRes.data ?? [];
-      } else if (!/latitude|longitude/.test(geoRes.error.message)) {
-        throw new Error(geoRes.error.message);
+    // Select candidates, richest first. Pre-021 the org's is_archived column
+    // doesn't exist and pre-018 the coordinate columns don't — a
+    // missing-column error falls through to the next-leanest select, exactly
+    // the existing geocoding pattern.
+    const selects = viewer
+      ? [ARCHIVED_GEO_SHOW_SELECT, GEO_SHOW_SELECT, ARCHIVED_SHOW_SELECT, SHOW_SELECT]
+      : [ARCHIVED_SHOW_SELECT, SHOW_SELECT];
+    for (const sel of selects) {
+      const res = await supabase
+        .from("shows").select(sel).eq("status", "auditions_open");
+      if (!res.error) {
+        data = res.data ?? [];
+        break;
+      }
+      if (!/latitude|longitude|is_archived/.test(res.error.message)) {
+        throw new Error(res.error.message);
       }
     }
-    if (data === null) {
-      const { data: plain, error } = await supabase
-        .from("shows").select(SHOW_SELECT).eq("status", "auditions_open");
-      if (error) throw new Error(error.message);
-      data = plain ?? [];
-    }
+    if (data === null) data = [];
+    // Archived theatres never surface publicly (migration 021).
+    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+    data = data.filter((r: any) => !r.orgs?.is_archived);
     /* eslint-disable @typescript-eslint/no-explicit-any */
     results = data.map((r: any) => {
       const show = rowToShow(r);
@@ -1517,7 +1538,11 @@ export async function getOpenAuditions(
     /* eslint-enable @typescript-eslint/no-explicit-any */
   } else {
     await delay();
-    results = shows.filter((s) => s.status === "auditions_open");
+    results = shows.filter(
+      (s) =>
+        s.status === "auditions_open" &&
+        !orgs.find((o) => o.id === s.orgId)?.isArchived
+    );
   }
 
   // NOTE: Don't filter by radius here — we return all results
@@ -2796,6 +2821,7 @@ function showUpdatesToRow(updates: Partial<Show>): Record<string, any> {
   if (updates.callbackContactPhone !== undefined) row.callback_contact_phone = updates.callbackContactPhone;
   if (updates.dayOfContactName !== undefined) row.day_of_contact_name = updates.dayOfContactName;
   if (updates.dayOfContactInfo !== undefined) row.day_of_contact_info = updates.dayOfContactInfo;
+  if (updates.offerAgreements !== undefined) row.offer_agreements = updates.offerAgreements;
   if (updates.posterUrl !== undefined) row.poster_url = updates.posterUrl;
   if (updates.city !== undefined) row.city = updates.city;
   if (updates.state !== undefined) row.state = updates.state;
@@ -2859,6 +2885,13 @@ export async function updateShow(showId: string, updates: Partial<Show>): Promis
       const rest: Record<string, unknown> = { ...row };
       delete rest.day_of_contact_name;
       delete rest.day_of_contact_info;
+      ({ data, error } = await supabase
+        .from("shows").update(rest).eq("id", showId).select(SHOW_SELECT).single());
+    }
+    // offer_agreements lands with migration 022 — same graceful pre-paste retry.
+    if (error && /offer_agreements/.test(error.message)) {
+      const rest: Record<string, unknown> = { ...row };
+      delete rest.offer_agreements;
       ({ data, error } = await supabase
         .from("shows").update(rest).eq("id", showId).select(SHOW_SELECT).single());
     }
@@ -3950,4 +3983,309 @@ export async function submitResourceLead(input: {
   }
   // Mock mode: succeed without storing (demo-friendly).
   await delay(300);
+}
+
+// ============================================================
+// DUPLICATE-THEATRE GUARD (QC #26) + PLATFORM ADMIN (QC #28)
+// ============================================================
+
+/**
+ * Normalize a theatre name for duplicate matching: lowercase, strip
+ * punctuation, collapse whitespace, drop a leading "the". Shared by the
+ * maker-onboarding duplicate check and the /admin duplicate badges.
+ */
+export function normalizeOrgName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^the\s+/, "");
+}
+
+/**
+ * Theatres whose name looks like a duplicate of `name` (normalized exact
+ * match, or one normalized name containing the other) in the same state.
+ * Cloud: orgs are already anon/authenticated-readable, so this is a plain
+ * select + client-side normalized compare (community-theatre scale).
+ * Used at maker onboarding BEFORE creating a theatre: "A theatre named X
+ * already exists — is it yours?"
+ */
+export async function findSimilarOrgs(
+  name: string,
+  state?: string | null
+): Promise<Array<{ id: string; name: string; city: string | null; state: string | null }>> {
+  const needle = normalizeOrgName(name);
+  if (!needle) return [];
+
+  let candidates: Array<{ id: string; name: string; city: string | null; state: string | null }>;
+  if (isSupabaseConfigured) {
+    let q = getSupabase().from("orgs").select("id, name, city, state");
+    if (state && state.trim()) q = q.ilike("state", state.trim());
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    candidates = data ?? [];
+  } else {
+    await delay(100);
+    candidates = orgs
+      .filter((o) => !state || !state.trim() || (o.state ?? "").toLowerCase() === state.trim().toLowerCase())
+      .map((o) => ({ id: o.id, name: o.name, city: o.city, state: o.state }));
+  }
+
+  return candidates.filter((o) => {
+    const other = normalizeOrgName(o.name);
+    if (!other) return false;
+    return other === needle || other.includes(needle) || needle.includes(other);
+  });
+}
+
+// ------------------------------------------------------------
+// Platform admin — the /admin directory + guarded repair actions.
+// Membership lives in platform_admins (migration 021, SQL-only); the app
+// can only ever ask "am I an admin?" via the is_platform_admin() RPC.
+// ------------------------------------------------------------
+
+export type AdminTheatreRow = {
+  id: string;
+  name: string;
+  city: string | null;
+  state: string | null;
+  isArchived: boolean;
+  ownerName: string | null;
+  ownerEmail: string | null;
+  memberCount: number;
+  showCount: number;
+  createdAt: string;
+};
+
+export type AdminMembershipRow = {
+  /** org_members row id — what admin_remove_org_member takes. */
+  memberRowId: string;
+  orgId: string;
+  orgName: string;
+  role: OrgRole;
+};
+
+export type AdminPersonRow = {
+  id: string;
+  displayName: string;
+  email: string;
+  createdAt: string;
+  memberships: AdminMembershipRow[];
+};
+
+export type AdminShowRow = {
+  id: string;
+  title: string;
+  orgId: string;
+  orgName: string;
+  status: string;
+  createdAt: string;
+};
+
+export type AdminDirectory = {
+  theatres: AdminTheatreRow[];
+  people: AdminPersonRow[];
+  shows: AdminShowRow[];
+};
+
+/**
+ * Is the signed-in user a platform admin? Cloud: the is_platform_admin()
+ * RPC (migration 021) — any error (incl. pre-paste missing function)
+ * degrades to false, so /admin just looks like a page that doesn't exist.
+ * Mock: true, so the page is developable without a database (actions are
+ * cloud-only and toast).
+ */
+export async function isPlatformAdmin(): Promise<boolean> {
+  if (!isSupabaseConfigured) return true;
+  try {
+    const { data, error } = await getSupabase().rpc("is_platform_admin");
+    if (error) return false;
+    return data === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The whole platform directory in one read: every theatre (owner, member
+ * and show counts, archived flag), every person (with their theatre
+ * memberships), every show. Admin RLS (021) opens org_members + setup-draft
+ * shows; profiles and orgs were already authenticated-readable. Sized for
+ * community-theatre scale (staging ≈ 70 users) — the page caps rendering,
+ * not the read.
+ */
+export async function getAdminDirectory(): Promise<AdminDirectory> {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  let orgRows: any[];
+  let memberRows: any[];
+  let profileRows: any[];
+  let showRows: any[];
+
+  if (isSupabaseConfigured) {
+    const supabase = getSupabase();
+    const [orgsRes, membersRes, profilesRes, showsRes] = await Promise.all([
+      supabase.from("orgs").select("*"),
+      supabase.from("org_members").select("id, org_id, user_id, role"),
+      supabase.from("profiles").select("id, display_name, email, created_at"),
+      supabase.from("shows").select("id, title, org_id, status, created_at"),
+    ]);
+    if (orgsRes.error) throw new Error(orgsRes.error.message);
+    if (membersRes.error) throw new Error(membersRes.error.message);
+    if (profilesRes.error) throw new Error(profilesRes.error.message);
+    if (showsRes.error) throw new Error(showsRes.error.message);
+    orgRows = (orgsRes.data ?? []).map((r: any) => ({
+      id: r.id, name: r.name, city: r.city, state: r.state,
+      isArchived: r.is_archived ?? false, createdAt: r.created_at,
+    }));
+    memberRows = (membersRes.data ?? []).map((r: any) => ({
+      id: r.id, orgId: r.org_id, userId: r.user_id, role: r.role,
+    }));
+    profileRows = (profilesRes.data ?? []).map((r: any) => ({
+      id: r.id, displayName: r.display_name, email: r.email, createdAt: r.created_at,
+    }));
+    showRows = (showsRes.data ?? []).map((r: any) => ({
+      id: r.id, title: r.title, orgId: r.org_id, status: r.status, createdAt: r.created_at,
+    }));
+  } else {
+    await delay();
+    orgRows = orgs.map((o) => ({
+      id: o.id, name: o.name, city: o.city, state: o.state,
+      isArchived: o.isArchived ?? false, createdAt: o.createdAt,
+    }));
+    memberRows = orgMembers
+      .filter((m) => m.status === "active" && m.userId)
+      .map((m) => ({ id: m.id, orgId: m.orgId, userId: m.userId, role: m.role }));
+    profileRows = actors.map((a) => ({
+      id: a.id, displayName: a.displayName, email: a.email, createdAt: a.createdAt,
+    }));
+    // Mock org members who aren't in the actors list still count as people.
+    for (const m of orgMembers) {
+      if (m.status === "active" && m.userId && !profileRows.some((p) => p.id === m.userId)) {
+        profileRows.push({
+          id: m.userId, displayName: m.name, email: m.email, createdAt: m.joinedAt ?? m.invitedAt,
+        });
+      }
+    }
+    showRows = shows.map((s) => ({
+      id: s.id, title: s.title, orgId: s.orgId, status: s.status, createdAt: s.createdAt,
+    }));
+  }
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+
+  const orgNameById = new Map<string, string>(orgRows.map((o) => [o.id, o.name]));
+  const profileById = new Map<string, { displayName: string; email: string }>(
+    profileRows.map((p) => [p.id, { displayName: p.displayName, email: p.email }])
+  );
+
+  const theatres: AdminTheatreRow[] = orgRows
+    .map((o) => {
+      const members = memberRows.filter((m) => m.orgId === o.id);
+      const owner = members.find((m) => m.role === "owner");
+      const ownerProfile = owner ? profileById.get(owner.userId) : undefined;
+      return {
+        id: o.id,
+        name: o.name,
+        city: o.city,
+        state: o.state,
+        isArchived: o.isArchived,
+        ownerName: ownerProfile?.displayName ?? null,
+        ownerEmail: ownerProfile?.email ?? null,
+        memberCount: members.length,
+        showCount: showRows.filter((s) => s.orgId === o.id).length,
+        createdAt: o.createdAt,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const people: AdminPersonRow[] = profileRows
+    .map((p) => ({
+      id: p.id,
+      displayName: p.displayName,
+      email: p.email,
+      createdAt: p.createdAt,
+      memberships: memberRows
+        .filter((m) => m.userId === p.id)
+        .map((m) => ({
+          memberRowId: m.id,
+          orgId: m.orgId,
+          orgName: orgNameById.get(m.orgId) ?? "Unknown theatre",
+          role: m.role as OrgRole,
+        })),
+    }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+  const adminShows: AdminShowRow[] = showRows
+    .map((s) => ({
+      id: s.id,
+      title: s.title,
+      orgId: s.orgId,
+      orgName: orgNameById.get(s.orgId) ?? "Unknown theatre",
+      status: s.status,
+      createdAt: s.createdAt,
+    }))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  return { theatres, people, shows: adminShows };
+}
+
+const CLOUD_ONLY_ADMIN = "Admin actions are cloud-only — connect Supabase to use them.";
+
+/** Basic fixes to a theatre's name / city / state (admin_update_org RPC). */
+export async function adminUpdateOrg(
+  orgId: string,
+  updates: { name: string; city: string; state: string }
+): Promise<void> {
+  if (!isSupabaseConfigured) throw new Error(CLOUD_ONLY_ADMIN);
+  const { error } = await getSupabase().rpc("admin_update_org", {
+    p_org_id: orgId,
+    p_name: updates.name,
+    p_city: updates.city,
+    p_state: updates.state,
+  });
+  if (error) throw new Error(error.message);
+}
+
+/** Soft-hide (or restore) a theatre from all public surfaces. */
+export async function adminArchiveOrg(orgId: string, archived: boolean): Promise<void> {
+  if (!isSupabaseConfigured) throw new Error(CLOUD_ONLY_ADMIN);
+  const { error } = await getSupabase().rpc("admin_archive_org", {
+    p_org_id: orgId,
+    p_archived: archived,
+  });
+  if (error) throw new Error(error.message);
+}
+
+/** HARD delete a theatre — cascades through its shows, members, signups. */
+export async function adminDeleteOrg(orgId: string): Promise<void> {
+  if (!isSupabaseConfigured) throw new Error(CLOUD_ONLY_ADMIN);
+  const { error } = await getSupabase().rpc("admin_delete_org", { p_org_id: orgId });
+  if (error) throw new Error(error.message);
+}
+
+/** Delete a user account (auth.users row; cascades). Admins are never deletable. */
+export async function adminDeleteUser(userId: string): Promise<void> {
+  if (!isSupabaseConfigured) throw new Error(CLOUD_ONLY_ADMIN);
+  const { error } = await getSupabase().rpc("admin_delete_user", { p_user_id: userId });
+  if (error) throw new Error(error.message);
+}
+
+/** Remove one org membership row (admin_remove_org_member RPC). */
+export async function adminRemoveOrgMember(memberRowId: string): Promise<void> {
+  if (!isSupabaseConfigured) throw new Error(CLOUD_ONLY_ADMIN);
+  const { error } = await getSupabase().rpc("admin_remove_org_member", {
+    p_member_row_id: memberRowId,
+  });
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Send a Supabase password-recovery email to a user. Client-safe (anon key;
+ * Supabase rate-limits it) — the same call the login page's "forgot
+ * password" flow would use.
+ */
+export async function sendPasswordResetEmail(email: string): Promise<void> {
+  if (!isSupabaseConfigured) throw new Error(CLOUD_ONLY_ADMIN);
+  const { error } = await getSupabase().auth.resetPasswordForEmail(email);
+  if (error) throw new Error(error.message);
 }

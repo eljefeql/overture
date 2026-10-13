@@ -69,6 +69,7 @@ import {
   Phone,
 } from "@phosphor-icons/react";
 import { SHOW_STATUS_LABELS } from "@/lib/constants";
+import { defaultOfferAgreements, effectiveOfferAgreements, parseAgreement } from "@/lib/offerAgreements";
 import type { ShowStatus, ShowType, RoleType, GenderReq, TeamRole } from "@/types";
 
 /* ============================================================
@@ -161,6 +162,10 @@ export default function ShowSetupPage() {
   const [addSlotOpen, setAddSlotOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [callbackOpen, setCallbackOpen] = useState(false);
+  const [agreementsOpen, setAgreementsOpen] = useState(false);
+
+  // Offer agreements editor — one textarea per agreement (first line = title).
+  const [agreementsDraft, setAgreementsDraft] = useState<string[]>([]);
 
   // Callback scheduling form
   const [callbackForm, setCallbackForm] = useState({
@@ -250,6 +255,17 @@ export default function ShowSetupPage() {
       queryClient.invalidateQueries({ queryKey: ["show", showId] });
       toast("success", "Callback details saved!");
       setCallbackOpen(false);
+    },
+    onError: (err: Error) => toast("error", err.message),
+  });
+
+  const agreementsMutation = useMutation({
+    mutationFn: (updates: Record<string, unknown>) => updateShow(showId, updates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["showSetup", showId] });
+      queryClient.invalidateQueries({ queryKey: ["show", showId] });
+      toast("success", "Offer agreements saved!");
+      setAgreementsOpen(false);
     },
     onError: (err: Error) => toast("error", err.message),
   });
@@ -634,6 +650,27 @@ export default function ShowSetupPage() {
   const hasCallbackInfo =
     show.callbackDate || show.callbackStartTime || show.callbackLocation || show.callbackNotes;
 
+  // ── Offer agreements (migration 022; defaults pre-fill the editor) ──
+  const performanceWindow = show.showOpen
+    ? `${formatDate(show.showOpen)}${show.showClose ? ` – ${formatDate(show.showClose)}` : ""}`
+    : null;
+  const usingDefaultAgreements = !(show.offerAgreements && show.offerAgreements.length > 0);
+  const effectiveAgreements = effectiveOfferAgreements(show, performanceWindow);
+
+  const openAgreements = () => {
+    setAgreementsDraft([...effectiveAgreements]);
+    setAgreementsOpen(true);
+  };
+
+  const submitAgreements = () => {
+    const cleaned = agreementsDraft.map((a) => a.trim()).filter(Boolean);
+    if (cleaned.length === 0) {
+      toast("error", "Keep at least one agreement — actors confirm these to accept a role.");
+      return;
+    }
+    agreementsMutation.mutate({ offerAgreements: cleaned });
+  };
+
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
       {/* ── Show Header ── */}
@@ -935,6 +972,28 @@ export default function ShowSetupPage() {
                 — it shows on their audition page once they&apos;re called back.
               </p>
             )}
+          </Card>
+
+          {/* Offer Agreements Card (item 25 — migration 022) */}
+          <Card variant="elevated" className="animate-fade-up" style={{ animationDelay: "250ms" }}>
+            <CardHeader>
+              <CardTitle>Offer Agreements</CardTitle>
+              <Button variant="ghost" size="sm" onClick={openAgreements} icon={<PencilSimple className="w-4 h-4" weight="bold" />}>
+                Edit
+              </Button>
+            </CardHeader>
+            <p className="text-xs text-clay-500 mb-3">
+              What actors agree to when they accept a role in this show.
+              {usingDefaultAgreements && " You're using Overture's standard agreements — edit them to match your theatre's policies."}
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {effectiveAgreements.map((a, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm text-curtain-800">
+                  <CheckCircle className="w-4 h-4 text-stage-500 flex-shrink-0" weight="duotone" />
+                  {parseAgreement(a).title}
+                </div>
+              ))}
+            </div>
           </Card>
         </div>
 
@@ -1491,6 +1550,62 @@ export default function ShowSetupPage() {
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="ghost" onClick={() => setCallbackOpen(false)}>Cancel</Button>
             <Button onClick={submitCallback} loading={callbackMutation.isPending}>Save Callbacks</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Offer Agreements Modal (item 25) ── */}
+      <Modal open={agreementsOpen} onClose={() => setAgreementsOpen(false)} title="Edit Offer Agreements">
+        <div className="flex flex-col gap-4">
+          <p className="text-xs text-clay-500">
+            Actors check off each agreement to accept a cast offer. The first line of each
+            is its title; the rest is the fine print. Guardians accept on a minor&apos;s behalf.
+          </p>
+          {agreementsDraft.map((a, i) => (
+            <div key={i} className="flex items-start gap-2">
+              <div className="flex-1 min-w-0">
+                <Textarea
+                  value={a}
+                  onChange={(e) => {
+                    const next = [...agreementsDraft];
+                    next[i] = e.target.value;
+                    setAgreementsDraft(next);
+                  }}
+                  rows={4}
+                  aria-label={`Agreement ${i + 1}`}
+                />
+              </div>
+              <button
+                onClick={() => setAgreementsDraft(agreementsDraft.filter((_, j) => j !== i))}
+                className="mt-2 w-8 h-8 flex items-center justify-center rounded-lg text-clay-400 hover:text-ruby-500 hover:bg-cream-100 transition-colors flex-shrink-0"
+                aria-label={`Remove agreement ${i + 1}`}
+              >
+                <Trash className="w-4 h-4" weight="bold" />
+              </button>
+            </div>
+          ))}
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => setAgreementsDraft([...agreementsDraft, ""])}
+              className="flex items-center gap-1.5 text-xs font-semibold text-stage-600 hover:text-stage-700 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" weight="bold" />
+              Add an agreement
+            </button>
+            <button
+              onClick={() =>
+                setAgreementsDraft(
+                  defaultOfferAgreements({ orgName: show.orgName, performanceWindow })
+                )
+              }
+              className="text-xs font-semibold text-clay-500 hover:text-curtain-700 transition-colors"
+            >
+              Reset to Overture defaults
+            </button>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="ghost" onClick={() => setAgreementsOpen(false)}>Cancel</Button>
+            <Button onClick={submitAgreements} loading={agreementsMutation.isPending}>Save Agreements</Button>
           </div>
         </div>
       </Modal>

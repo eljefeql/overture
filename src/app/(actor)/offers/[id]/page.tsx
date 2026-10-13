@@ -28,6 +28,7 @@ import {
 } from "@/components/ui";
 import { ConfettiBurst } from "@/components/ui/ConfettiBurst";
 import { formatDate, formatTeamRole } from "@/lib/utils";
+import { effectiveOfferAgreements, parseAgreement } from "@/lib/offerAgreements";
 import {
   Trophy,
   Calendar,
@@ -51,11 +52,9 @@ export default function CastOfferPage() {
   const queryClient = useQueryClient();
 
   const [showConfetti, setShowConfetti] = useState(false);
-  const [rehearsalChecked, setRehearsalChecked] = useState(false);
-  const [performanceChecked, setPerformanceChecked] = useState(false);
-  const [conductChecked, setConductChecked] = useState(false);
-  const [membershipChecked, setMembershipChecked] = useState(false);
-  const [mediaChecked, setMediaChecked] = useState(false);
+  // One checkbox per agreement — the show's own list (migration 022) or the
+  // Overture defaults. Keyed by index into the effective agreements array.
+  const [checkedAgreements, setCheckedAgreements] = useState<Set<number>>(new Set());
 
   // ── Queries ──────────────────────────────────────────
   const { data: assignment, isLoading: loadingAssignment } = useQuery({
@@ -144,7 +143,21 @@ export default function CastOfferPage() {
   const offeredRole = roles.find((r) => r.id === assignment.roleId);
   const isAccepted = assignment.status === "accepted";
   const isSent = assignment.status === "sent";
-  const allChecked = rehearsalChecked && performanceChecked && conductChecked && membershipChecked && mediaChecked;
+
+  // Commitments & terms: the show's editable list (setup page) with the old
+  // fixed copy as the fallback, so shows that never touched it are unchanged.
+  const performanceWindow = show.showOpen
+    ? `${formatDate(show.showOpen)}${show.showClose ? ` – ${formatDate(show.showClose)}` : ""}`
+    : null;
+  const agreements = effectiveOfferAgreements(show, performanceWindow).map(parseAgreement);
+  const allChecked = agreements.length > 0 && agreements.every((_, i) => checkedAgreements.has(i));
+  const toggleAgreement = (i: number) =>
+    setCheckedAgreements((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
 
   // Guardian consent: a minor's agreements are made by their guardian
   const minorProfile = actorRecord?.profile?.isMinor ? actorRecord.profile : null;
@@ -360,122 +373,30 @@ export default function CastOfferPage() {
             {minorProfile ? "this role on your child's behalf" : "your role"}.
           </p>
 
-          {/* 1. Rehearsal Attendance */}
-          <label className="flex items-start gap-3 cursor-pointer group mb-1">
-            <input
-              type="checkbox"
-              checked={rehearsalChecked}
-              onChange={(e) => setRehearsalChecked(e.target.checked)}
-              className="mt-1 w-5 h-5 rounded border-cream-300 text-curtain-600 focus:ring-curtain-500 flex-shrink-0"
-            />
-            <div>
-              <p className="text-sm font-semibold text-curtain-900 group-hover:text-curtain-700 transition">
-                Rehearsal Attendance
-              </p>
-              <p className="text-xs text-clay-500 mt-1 leading-relaxed">
-                I understand that I may miss a{" "}
-                <strong className="text-curtain-800">maximum of 3 rehearsals</strong>{" "}
-                during the production. Additional absences may result in being recast.
-                I have shared my known conflicts with the production team.
-              </p>
+          {/* The show's agreements (or the Overture defaults when unset) */}
+          {agreements.map((item, i) => (
+            <div key={i}>
+              {i > 0 && <hr className="border-cream-200 my-4" />}
+              <label className="flex items-start gap-3 cursor-pointer group mb-1">
+                <input
+                  type="checkbox"
+                  checked={checkedAgreements.has(i)}
+                  onChange={() => toggleAgreement(i)}
+                  className="mt-1 w-5 h-5 rounded border-cream-300 text-curtain-600 focus:ring-curtain-500 flex-shrink-0"
+                />
+                <div>
+                  <p className="text-sm font-semibold text-curtain-900 group-hover:text-curtain-700 transition">
+                    {item.title}
+                  </p>
+                  {item.body && (
+                    <p className="text-xs text-clay-500 mt-1 leading-relaxed whitespace-pre-line">
+                      {item.body}
+                    </p>
+                  )}
+                </div>
+              </label>
             </div>
-          </label>
-
-          <hr className="border-cream-200 my-4" />
-
-          {/* 2. Performance Commitment */}
-          <label className="flex items-start gap-3 cursor-pointer group mb-1">
-            <input
-              type="checkbox"
-              checked={performanceChecked}
-              onChange={(e) => setPerformanceChecked(e.target.checked)}
-              className="mt-1 w-5 h-5 rounded border-cream-300 text-curtain-600 focus:ring-curtain-500 flex-shrink-0"
-            />
-            <div>
-              <p className="text-sm font-semibold text-curtain-900 group-hover:text-curtain-700 transition">
-                Performance Commitment
-              </p>
-              <p className="text-xs text-clay-500 mt-1 leading-relaxed">
-                I commit to being available for{" "}
-                <strong className="text-curtain-800">all scheduled performances</strong>
-                {show.showOpen && (
-                  <> ({formatDate(show.showOpen)}{show.showClose && ` – ${formatDate(show.showClose)}`})</>
-                )}.
-                I understand that missing a performance is only permitted in cases of emergency or illness.
-              </p>
-            </div>
-          </label>
-
-          <hr className="border-cream-200 my-4" />
-
-          {/* 3. Code of Conduct */}
-          <label className="flex items-start gap-3 cursor-pointer group mb-1">
-            <input
-              type="checkbox"
-              checked={conductChecked}
-              onChange={(e) => setConductChecked(e.target.checked)}
-              className="mt-1 w-5 h-5 rounded border-cream-300 text-curtain-600 focus:ring-curtain-500 flex-shrink-0"
-            />
-            <div>
-              <p className="text-sm font-semibold text-curtain-900 group-hover:text-curtain-700 transition">
-                Code of Conduct
-              </p>
-              <p className="text-xs text-clay-500 mt-1 leading-relaxed">
-                I have read and agree to abide by{" "}
-                <span className="text-curtain-600 underline decoration-curtain-300 cursor-pointer hover:text-curtain-800 transition">
-                  {show.orgName}&apos;s Safe Space &amp; Conduct Policy
-                </span>
-                , which includes guidelines on respectful behavior, anti-harassment,
-                and creating an inclusive environment for all cast and crew.
-              </p>
-            </div>
-          </label>
-
-          <hr className="border-cream-200 my-4" />
-
-          {/* 4. Membership & Participation */}
-          <label className="flex items-start gap-3 cursor-pointer group mb-1">
-            <input
-              type="checkbox"
-              checked={membershipChecked}
-              onChange={(e) => setMembershipChecked(e.target.checked)}
-              className="mt-1 w-5 h-5 rounded border-cream-300 text-curtain-600 focus:ring-curtain-500 flex-shrink-0"
-            />
-            <div>
-              <p className="text-sm font-semibold text-curtain-900 group-hover:text-curtain-700 transition">
-                Membership &amp; Participation
-              </p>
-              <p className="text-xs text-clay-500 mt-1 leading-relaxed">
-                I understand that participation requires an active {show.orgName} membership
-                {" "}(<strong className="text-curtain-800">$35/year</strong>) and a minimum of{" "}
-                <strong className="text-curtain-800">4 volunteer hours</strong>{" "}
-                during the production (set build, strike, concessions, etc.).
-                Membership can be paid online or at the first rehearsal.
-              </p>
-            </div>
-          </label>
-
-          <hr className="border-cream-200 my-4" />
-
-          {/* 5. Photo & Media Release */}
-          <label className="flex items-start gap-3 cursor-pointer group">
-            <input
-              type="checkbox"
-              checked={mediaChecked}
-              onChange={(e) => setMediaChecked(e.target.checked)}
-              className="mt-1 w-5 h-5 rounded border-cream-300 text-curtain-600 focus:ring-curtain-500 flex-shrink-0"
-            />
-            <div>
-              <p className="text-sm font-semibold text-curtain-900 group-hover:text-curtain-700 transition">
-                Photo &amp; Media Release
-              </p>
-              <p className="text-xs text-clay-500 mt-1 leading-relaxed">
-                I grant {show.orgName}{" "}permission to use production photos and video for
-                promotional purposes, including social media, the theatre&apos;s website,
-                and printed materials.
-              </p>
-            </div>
-          </label>
+          ))}
         </Card>
       )}
 

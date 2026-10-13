@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/features/auth/AuthContext";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
@@ -1366,13 +1367,18 @@ function PeopleSection({
           {castPeople.length > 0 ? (
             <div className="flex flex-col gap-3">
               {castPeople.map((p) => (
-                <div key={p.id} className="flex items-center gap-3">
+                <Link
+                  key={p.id}
+                  href={`/actors/${p.id}`}
+                  className="flex items-center gap-3 -mx-1.5 px-1.5 py-0.5 rounded-xl hover:bg-cream-50 transition"
+                  title={`View ${p.name}'s profile`}
+                >
                   <Avatar name={p.name} size="sm" />
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-curtain-900 truncate">{p.name}</p>
                     <p className="text-xs text-clay-500 truncate">{p.roles.join(" · ")}</p>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           ) : (
@@ -1393,13 +1399,28 @@ function PeopleSection({
           <div className="flex flex-col gap-3">
             {data.team.map((t) => (
               <div key={t.id} className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <Avatar name={t.userName} size="sm" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-curtain-900 truncate">{t.userName}</p>
-                    <p className="text-xs text-clay-500">{formatTeamRole(t.role)}</p>
+                {/* Guests (no account) aren't linkable — their userId is a guest- placeholder */}
+                {t.userId.startsWith("guest-") ? (
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Avatar name={t.userName} size="sm" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-curtain-900 truncate">{t.userName}</p>
+                      <p className="text-xs text-clay-500">{formatTeamRole(t.role)}</p>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <Link
+                    href={`/actors/${t.userId}`}
+                    className="flex items-center gap-3 min-w-0 -mx-1.5 px-1.5 py-0.5 rounded-xl hover:bg-cream-50 transition"
+                    title={`View ${t.userName}'s profile`}
+                  >
+                    <Avatar name={t.userName} size="sm" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-curtain-900 truncate">{t.userName}</p>
+                      <p className="text-xs text-clay-500">{formatTeamRole(t.role)}</p>
+                    </div>
+                  </Link>
+                )}
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {t.email && (
                     <a

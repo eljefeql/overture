@@ -371,9 +371,14 @@ export default function CallbacksPage() {
                           >
                             <div className="flex items-center gap-3">
                               <Avatar name={cb.actorName} size="sm" />
-                              <span className="text-sm font-semibold text-curtain-900">
+                              <Link
+                                href={`/actors/${cb.actorId}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-sm font-semibold text-curtain-900 hover:text-curtain-700 hover:underline decoration-stage-400 underline-offset-4 transition"
+                                title={`View ${cb.actorName}'s profile`}
+                              >
                                 {cb.actorName}
-                              </span>
+                              </Link>
                             </div>
                             <Badge variant={(CALLBACK_STATUS_BADGE[cb.status] ?? "warning") as "default"} size="sm">
                               {CALLBACK_STATUS_LABELS[cb.status] ?? "Pending"}
@@ -418,7 +423,14 @@ export default function CallbacksPage() {
                     >
                       <Avatar name={signup.actorName} size="sm" />
                       <div>
-                        <p className="text-sm font-semibold text-curtain-900">{signup.actorName}</p>
+                        <Link
+                          href={`/actors/${signup.actorId}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-sm font-semibold text-curtain-900 hover:text-curtain-700 hover:underline decoration-stage-400 underline-offset-4 transition"
+                          title={`View ${signup.actorName}'s profile`}
+                        >
+                          {signup.actorName}
+                        </Link>
                         <p className="text-[11px] text-clay-400">
                           {signup.status === "shortlisted" ? "Shortlisted" : "Auditioned"}
                         </p>

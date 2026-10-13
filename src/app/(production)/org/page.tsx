@@ -40,6 +40,7 @@ import {
   Badge,
   Button,
   Avatar,
+  Pill,
   Input,
   Textarea,
   Modal,
@@ -74,6 +75,7 @@ import {
   CalendarStar,
   Camera,
   MaskHappy,
+  X,
 } from "@phosphor-icons/react";
 import type { OrgMember, ShowTeamMember, Show, Venue, OrgLeader, OrgPhoto, SpaceType, OrgPastProduction } from "@/types";
 
@@ -305,6 +307,15 @@ export default function TheatreHubPage() {
               </span>
             )}
           </div>
+          {(org.affiliations ?? []).length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {(org.affiliations ?? []).map((a) => (
+                <Pill key={a} variant="status" className="cursor-default">
+                  {a}
+                </Pill>
+              ))}
+            </div>
+          )}
         </Card>
       </div>
 
@@ -527,6 +538,28 @@ function TheatreDetailsModal({
   const [facebookUrl, setFacebookUrl] = useState(org.facebookUrl ?? "");
   const [instagramUrl, setInstagramUrl] = useState(org.instagramUrl ?? "");
   const [ticketingUrl, setTicketingUrl] = useState(org.ticketingUrl ?? "");
+  // Affiliations (migration 022) — chips with suggestions + free text.
+  const [affiliations, setAffiliations] = useState<string[]>(org.affiliations ?? []);
+  const [affiliationInput, setAffiliationInput] = useState("");
+
+  const AFFILIATION_SUGGESTIONS = ["EMACT", "AACT", "NETC"];
+
+  const toggleAffiliation = (name: string) => {
+    setAffiliations((prev) =>
+      prev.some((a) => a.toLowerCase() === name.toLowerCase())
+        ? prev.filter((a) => a.toLowerCase() !== name.toLowerCase())
+        : [...prev, name]
+    );
+  };
+
+  const addAffiliationFromInput = () => {
+    const name = affiliationInput.trim();
+    if (!name) return;
+    if (!affiliations.some((a) => a.toLowerCase() === name.toLowerCase())) {
+      setAffiliations([...affiliations, name]);
+    }
+    setAffiliationInput("");
+  };
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -542,6 +575,7 @@ function TheatreDetailsModal({
         facebookUrl: facebookUrl.trim() || null,
         instagramUrl: instagramUrl.trim() || null,
         ticketingUrl: ticketingUrl.trim() || null,
+        affiliations,
       });
     },
     onSuccess: () => {
@@ -607,6 +641,52 @@ function TheatreDetailsModal({
             value={instagramUrl}
             onChange={(e) => setInstagramUrl(e.target.value)}
           />
+        </div>
+
+        {/* Affiliations (migration 022) — chip input with suggestions */}
+        <div>
+          <label className="block text-xs font-semibold text-curtain-700 tracking-wide mb-1">
+            Affiliations
+          </label>
+          <p className="text-[11px] text-clay-400 mb-2">
+            Organizations your theatre belongs to — shown as badges on your public page.
+          </p>
+          <div className="flex flex-wrap gap-2 mb-2">
+            {/* Selected chips first (incl. free-text ones), then unselected suggestions */}
+            {affiliations.map((a) => (
+              <Pill key={a} variant="status" active onClick={() => toggleAffiliation(a)}>
+                {a}
+                <X className="w-3 h-3" weight="bold" />
+              </Pill>
+            ))}
+            {AFFILIATION_SUGGESTIONS.filter(
+              (s) => !affiliations.some((a) => a.toLowerCase() === s.toLowerCase())
+            ).map((s) => (
+              <Pill key={s} variant="filter" onClick={() => toggleAffiliation(s)}>
+                <Plus className="w-3 h-3" weight="bold" />
+                {s}
+              </Pill>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 min-w-0">
+              <Input
+                value={affiliationInput}
+                onChange={(e) => setAffiliationInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addAffiliationFromInput();
+                  }
+                }}
+                placeholder="Add another (e.g. a state or regional association)"
+                aria-label="Add an affiliation"
+              />
+            </div>
+            <Button variant="outline" size="sm" onClick={addAffiliationFromInput}>
+              Add
+            </Button>
+          </div>
         </div>
       </div>
       <div className="mt-6 flex justify-end gap-3">

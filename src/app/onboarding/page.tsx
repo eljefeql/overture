@@ -4,7 +4,7 @@ import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/features/auth/AuthContext";
-import { createActorProfile, createOrg, createOrgLeader } from "@/lib/api/client";
+import { createActorProfile, createOrg, createOrgLeader, findSimilarOrgs } from "@/lib/api/client";
 import { completeActorOnboarding, completeMakerOnboarding } from "@/lib/api/onboarding";
 import { selectOrgForUser } from "@/features/auth/useOrg";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
@@ -18,6 +18,7 @@ import {
   useToast,
 } from "@/components/ui";
 import { StepIndicator } from "@/components/ui/StepIndicator";
+import { DanceStylesField } from "@/components/profile/DanceStylesField";
 import {
   MaskHappy,
   Megaphone,
@@ -159,7 +160,7 @@ function OnboardingWizard() {
   // ── Actor: talent ──
   const [heightInches, setHeightInches] = useState("");
   const [vocalRange, setVocalRange] = useState("");
-  const [danceStyles, setDanceStyles] = useState("");
+  const [danceStyles, setDanceStyles] = useState<string[]>([]);
   const [specialSkills, setSpecialSkills] = useState("");
   const [bio, setBio] = useState("");
 
@@ -172,6 +173,10 @@ function OnboardingWizard() {
   // ── Maker ──
   const [primaryRole, setPrimaryRole] = useState<string>("director");
   const [orgName, setOrgName] = useState("");
+  const [dupMatches, setDupMatches] = useState<
+    { id: string; name: string; city: string | null; state: string | null }[]
+  >([]);
+  const [dupAcknowledged, setDupAcknowledged] = useState(false);
   const [orgCity, setOrgCity] = useState("");
   const [orgState, setOrgState] = useState("");
 
@@ -185,7 +190,7 @@ function OnboardingWizard() {
           bio: bio.trim(),
           heightInches: num(heightInches),
           vocalRange: vocalRange.trim() || null,
-          danceStyles: csv(danceStyles),
+          danceStyles,
           specialSkills: csv(specialSkills),
           ageRangeLow: num(ageRangeLow),
           ageRangeHigh: num(ageRangeHigh),
@@ -312,9 +317,23 @@ function OnboardingWizard() {
     actorMutation.mutate(undefined, { onSuccess: () => setStep(3) });
   }
 
-  function submitMakerTheatre() {
+  async function submitMakerTheatre() {
     setHasAttemptedSubmit(true);
     if (!makerTheatreValid) return;
+    // Duplicate-theatre guard (QC #26): warn once before creating a theatre
+    // whose name matches an existing one. Never blocks — "Create anyway"
+    // (dupAcknowledged) proceeds. Check failures are treated as no-matches.
+    if (!dupAcknowledged) {
+      try {
+        const matches = await findSimilarOrgs(orgName, orgState.trim() || null);
+        if (matches.length > 0) {
+          setDupMatches(matches.slice(0, 3));
+          return;
+        }
+      } catch {
+        // never block creation on the check
+      }
+    }
     makerMutation.mutate(undefined, {
       onSuccess: () => {
         setHasAttemptedSubmit(false);
@@ -583,12 +602,7 @@ function OnboardingWizard() {
                   onChange={(e) => setVocalRange(e.target.value)}
                 />
               </div>
-              <Input
-                label="Dance Styles"
-                placeholder="Comma separated: Ballet, Jazz"
-                value={danceStyles}
-                onChange={(e) => setDanceStyles(e.target.value)}
-              />
+              <DanceStylesField value={danceStyles} onChange={setDanceStyles} />
               <Input
                 label="Special Skills"
                 placeholder="Comma separated: Guitar, Dialects"
@@ -853,6 +867,51 @@ function OnboardingWizard() {
               />
             </div>
           </div>
+
+          {dupMatches.length > 0 && !dupAcknowledged && (
+            <Card variant="highlighted" padding="standard" className="mt-6">
+              <p className="text-sm font-semibold text-curtain-900 mb-1">
+                {dupMatches.length === 1
+                  ? `A theatre named ${dupMatches[0].name} already exists${dupMatches[0].city ? ` in ${dupMatches[0].city}` : ""}.`
+                  : "Theatres with this name already exist:"}
+              </p>
+              {dupMatches.length > 1 && (
+                <ul className="text-sm text-curtain-800 mb-1 list-disc ml-5">
+                  {dupMatches.map((m) => (
+                    <li key={m.id}>
+                      {m.name}
+                      {m.city ? ` — ${m.city}${m.state ? `, ${m.state}` : ""}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="text-sm text-clay-500 mb-3">
+                Is that yours? Ask an admin there to invite you with the email
+                you signed up with and you&apos;ll be added automatically — no
+                need to create a duplicate.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => setDupMatches([])}>
+                  That&apos;s my theatre — I&apos;ll ask for an invite
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setDupAcknowledged(true);
+                    makerMutation.mutate(undefined, {
+                      onSuccess: () => {
+                        setHasAttemptedSubmit(false);
+                        setStep(2);
+                      },
+                    });
+                  }}
+                >
+                  Create anyway
+                </Button>
+              </div>
+            </Card>
+          )}
 
           <div className="flex justify-between mt-8">
             <Button

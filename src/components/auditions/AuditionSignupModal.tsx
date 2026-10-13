@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { Modal, Button, Pill, Card } from "@/components/ui";
+import { useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Modal, Button, Pill, Card, useToast } from "@/components/ui";
 import {
   ConflictDatePicker,
   type ConflictDate,
@@ -14,7 +15,11 @@ import {
   Clock,
   Users,
   UsersThree,
+  Camera,
+  CheckCircle,
 } from "@phosphor-icons/react";
+import { uploadHeadshot, MAX_UPLOAD_BYTES } from "@/lib/api/photos";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import type { ShowRole, AuditionGroup } from "@/types";
 
 type SlotAvailability = { groupId: string; taken: number };
@@ -31,6 +36,14 @@ type Props = {
   showClose?: string;
   onSubmit: (data: SignupFormData) => void;
   isSubmitting?: boolean;
+  /** Signed-in actor's id — enables the headshot nudge's inline upload. */
+  actorUserId?: string;
+  /** False = the actor has no headshot yet → show the hard nudge (QC item 20).
+   *  The nudge never blocks signup. */
+  hasHeadshot?: boolean;
+  /** Lets the page remember a successful inline upload (the modal unmounts on
+   *  close, and the auth context's avatarUrl only refreshes on next session). */
+  onHeadshotUploaded?: () => void;
 };
 
 export type SignupFormData = {
@@ -77,6 +90,9 @@ export function AuditionSignupModal({
   showClose,
   onSubmit,
   isSubmitting,
+  actorUserId,
+  hasHeadshot = true,
+  onHeadshotUploaded,
 }: Props) {
   const [selectedGroup, setSelectedGroup] = useState<string>("");
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
@@ -90,6 +106,38 @@ export function AuditionSignupModal({
   const [mediaConsent, setMediaConsent] = useState(false);
   const [commitmentAck, setCommitmentAck] = useState(false);
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
+
+  // ── Headshot hard nudge (QC item 20) — never blocks ──
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const headshotInputRef = useRef<HTMLInputElement>(null);
+  const [nudgeDismissed, setNudgeDismissed] = useState(false);
+  const [headshotUploaded, setHeadshotUploaded] = useState(false);
+
+  const headshotMutation = useMutation({
+    mutationFn: (file: File) => uploadHeadshot(actorUserId!, file),
+    onSuccess: () => {
+      setHeadshotUploaded(true);
+      onHeadshotUploaded?.();
+      queryClient.invalidateQueries({ queryKey: ["actor", actorUserId] });
+      toast("success", "Headshot added — directors can see you now!");
+    },
+    onError: (err: Error) => toast("error", err.message),
+  });
+
+  const handleHeadshotFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !actorUserId) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast("error", "That file is over 10MB — try a smaller one.");
+      return;
+    }
+    headshotMutation.mutate(file);
+  };
+
+  const showHeadshotNudge =
+    !!actorUserId && (!hasHeadshot || headshotUploaded) && !nudgeDismissed;
 
   const canSubmit =
     selectedGroup !== "" &&
@@ -144,6 +192,74 @@ export function AuditionSignupModal({
   return (
     <Modal open={open} onClose={onClose} title={`Sign Up — ${showTitle}`}>
       <div className="space-y-6">
+        {/* SECTION 0: Headshot hard nudge — prominent, warm-but-blunt, never blocking */}
+        {showHeadshotNudge && (
+          <Card variant="highlighted" padding="standard">
+            {headshotUploaded ? (
+              <div className="flex items-center gap-3">
+                <CheckCircle className="w-6 h-6 text-forest-500 flex-shrink-0" weight="fill" />
+                <p className="text-sm text-curtain-900">
+                  <span className="font-semibold">Headshot added.</span>{" "}
+                  Your signup now shows your face — carry on below.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-stage-100 flex items-center justify-center flex-shrink-0">
+                    <Camera className="w-5 h-5 text-stage-600" weight="duotone" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-curtain-900">
+                      You don&apos;t have a headshot yet
+                    </p>
+                    <p className="text-xs text-curtain-800 mt-1 leading-relaxed">
+                      Directors cast from faces. Without a headshot, your signup is
+                      easy to pass over — a quick phone selfie beats a blank circle.
+                    </p>
+                  </div>
+                </div>
+                {isSupabaseConfigured ? (
+                  <div className="flex flex-col sm:flex-row gap-2 mt-3">
+                    <input
+                      ref={headshotInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleHeadshotFile}
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => headshotInputRef.current?.click()}
+                      loading={headshotMutation.isPending}
+                      icon={<Camera className="w-4 h-4" weight="bold" />}
+                    >
+                      Add a headshot now
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setNudgeDismissed(true)}
+                    >
+                      Continue without a photo
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="mt-3">
+                    <p className="text-xs text-clay-500 mb-2">
+                      Photo uploads arrive with cloud mode — you can add one from
+                      your profile later.
+                    </p>
+                    <Button variant="ghost" size="sm" onClick={() => setNudgeDismissed(true)}>
+                      Continue without a photo
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </Card>
+        )}
+
         {/* SECTION 1: Time Slot Selection */}
         <div>
           <label className="block text-xs font-semibold text-curtain-700 tracking-wide mb-1">

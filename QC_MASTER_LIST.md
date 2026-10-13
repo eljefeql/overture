@@ -21,8 +21,8 @@ findings (3), Fiddler population findings (2), carried infrastructure. Status mo
 |---|---|---|
 | 8 | Add team members from the THEATRE page too | /org should list active shows with an add-to-team affordance (mirror of setup's team section). |
 | 9 | Show setup "add team member" should suggest org members | Picker of existing org people first; email entry stays for outsiders. |
-| 10 | Slide-out panel: maximize headshot (Lightbox) | Resume link already exists (July); verify + add photo zoom. |
-| 11 | Dance styles → options, not free CSV | Curated multi-select chips (ballet, tap, jazz, ballroom, hip-hop, contemporary, partner/swing, none) + free-text "other". Profile edit + onboarding. |
+| 10 | Slide-out panel: maximize headshot (Lightbox) | ✅ 2026-10-13 — slide-panel headshot opens Lightbox (+gallery); resume link intact. Resume link already exists (July); verify + add photo zoom. |
+| 11 | Dance styles → options, not free CSV | ✅ 2026-10-13 — DanceStylesField chips + Other, profile edit + onboarding. Curated multi-select chips (ballet, tap, jazz, ballroom, hip-hop, contemporary, partner/swing, none) + free-text "other". Profile edit + onboarding. |
 | 12 | Supplemental casting call after callbacks/casting/cast | Real scenario ×2: need one more role cast late. Design: "Add audition block" allowed in late statuses + role-scoped mini-call; public page copy for "seeking: X only". NEEDS DESIGN PASS before build. |
 | 13 | Show creation checklist order: team BEFORE roles | "Define who you have, add who you need." Reorder checklist + setup sections. |
 | 14 | Volunteer needs: multiple roles per date/event | Group shifts under an event (Set build Saturday → carpentry/painters/misc). Schema addition likely (019 or 020). |
@@ -31,11 +31,11 @@ findings (3), Fiddler population findings (2), carried infrastructure. Status mo
 | 17 | Rehearsal add/edit: surface conflicts | Show known cast conflicts (signup_conflicts) + existing absences for the chosen date while scheduling. |
 | 18 | Declined offers vanish from history when refilled | From population run: refill forces declined→withdrawn; tracker loses the decline. Keep history (status or audit trail). |
 | 19 | Post-publish offers path | Adding a cast member after publish works via API; make the UI path intentional (ties into #12). |
-| 24 | Theatre affiliations (EMACT, AACT…) | Chips on org edit + public theatre page. Small; text/multi-select, no directory integration needed. |
-| 25 | Editable offer agreements | The terms an actor agrees to when accepting a role are currently fixed copy in the offer flow — make them show-level editable (setup section, sensible defaults preserved) so each theatre/director sets their own. |
-| 26 | Duplicate-theatre protection (minimal) | At maker onboarding: name-similarity check → "A theatre named X already exists in CityName — is it yours?" with a request-to-join nudge instead of silent duplicate creation. Full claim flow stays parked (P4). |
+| 24 | Theatre affiliations (EMACT, AACT…) | ✅ 2026-10-13 — orgs.affiliations (mig 022), chips + public badges. Chips on org edit + public theatre page. Small; text/multi-select, no directory integration needed. |
+| 25 | Editable offer agreements | ✅ 2026-10-13 — shows.offer_agreements (mig 022), setup card + dynamic acceptance checklist. The terms an actor agrees to when accepting a role are currently fixed copy in the offer flow — make them show-level editable (setup section, sensible defaults preserved) so each theatre/director sets their own. |
+| 26 | Duplicate-theatre protection (minimal) | ✅ 2026-10-13 — findSimilarOrgs + onboarding warning card w/ Create anyway. At maker onboarding: name-similarity check → "A theatre named X already exists in CityName — is it yours?" with a request-to-join nudge instead of silent duplicate creation. Full claim flow stays parked (P4). |
 | 27 | **Modular adoption: "Have you already cast this show?"** | At show creation, ask which parts they want: team recruiting / casting / hub only. Already-cast shows skip auditions entirely: director bulk-adds cast members (name+email, invite rides the new invite-email pipeline) straight into the Hub. STRATEGIC — the churn-killer for theatres scared of switching mid-season. NEEDS DESIGN PASS first (pairs with #12 supplemental calls). |
-| 28 | Platform admin, minimal slice | `platform_admin` flag on Chris's account → /admin: read-only directory of all theatres/users/shows, dupe spotting. Password resets: already available in the Supabase dashboard today (Auth → user → ⋯ → Send password recovery) — document, don't rebuild. Merge tools are P4. |
+| 28 | Platform admin, minimal slice | ✅ 2026-10-13 — /admin built (directory, dupe badges, edit/archive/delete/remove/reset actions, mig 021). `platform_admin` flag on Chris's account → /admin: read-only directory of all theatres/users/shows, dupe spotting. Password resets: already available in the Supabase dashboard today (Auth → user → ⋯ → Send password recovery) — document, don't rebuild. Merge tools are P4. |
 
 ## P3 — Decisions (ANSWERED 2026-10-12 → build in P2 wave)
 

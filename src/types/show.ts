@@ -31,6 +31,12 @@ export type Org = {
   facebookUrl: string | null;
   instagramUrl: string | null;
   ticketingUrl: string | null;
+  /** Organizations the theatre belongs to (EMACT, AACT, NETC, free text) —
+   *  migration 022. Optional so mock orgs and pre-paste rows stay valid. */
+  affiliations?: string[];
+  /** Platform-admin soft hide (migration 021) — archived orgs are excluded
+   *  from public surfaces. Optional so mock orgs and pre-paste rows stay valid. */
+  isArchived?: boolean;
 } & Timestamps;
 
 /** What a space is used for — labels & groups spaces on the public page. */
@@ -140,6 +146,11 @@ export type Show = {
    *  the public page falls back to the stage manager from the show team. */
   dayOfContactName?: string | null;
   dayOfContactInfo?: string | null;
+  /** Show-level offer agreements (migration 022) — the commitments an actor
+   *  checks off when accepting a cast offer. Each string's first line is the
+   *  agreement title, the rest its body. Null/absent = use the Overture
+   *  defaults (the previously fixed copy), so existing shows are unchanged. */
+  offerAgreements?: string[] | null;
   posterUrl: string | null;
   city: string;
   state: string;

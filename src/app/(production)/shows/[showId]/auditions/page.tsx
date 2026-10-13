@@ -21,7 +21,7 @@ import {
   updateTeamNote,
   deleteTeamNote,
 } from "@/lib/api/client";
-import { getResumeSignedUrl } from "@/lib/api/photos";
+import { getResumeSignedUrl, getProfilePhotos } from "@/lib/api/photos";
 import {
   Card,
   CardHeader,
@@ -36,6 +36,8 @@ import {
   StatBlock,
   PageSkeleton,
   EmptyState,
+  Lightbox,
+  type LightboxPhoto,
 } from "@/components/ui";
 import { TeamNotesFeed } from "@/components/casting/TeamNotesFeed";
 import { useUIStore } from "@/stores/useUIStore";
@@ -144,6 +146,32 @@ export default function AuditionsPage() {
     queryFn: () => getTeamNotes(showId, selectedActorId!),
     enabled: !!selectedActorId,
   });
+
+  // Headshot zoom (QC item 10): clicking the panel headshot opens the
+  // existing Lightbox, with the actor's production gallery along for the
+  // ride. Photos are cloud-only (profile_photos) — errors/mock → headshot only.
+  const { data: panelPhotos = [] } = useQuery({
+    queryKey: ["profilePhotos", selectedActorId],
+    queryFn: async () => {
+      try {
+        return await getProfilePhotos(selectedActorId!);
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!selectedActorId && isSupabaseConfigured,
+  });
+  const [panelLightboxIndex, setPanelLightboxIndex] = useState<number | null>(null);
+  const panelLightboxPhotos: LightboxPhoto[] = selectedActor
+    ? [
+        ...(selectedActor.avatarUrl
+          ? [{ url: selectedActor.avatarUrl, caption: selectedActor.displayName, label: "Headshot" }]
+          : []),
+        ...panelPhotos
+          .filter((p) => p.kind === "production")
+          .map((p) => ({ url: p.publicUrl, caption: p.caption, label: p.showTitle ?? "Production" })),
+      ]
+    : [];
 
   // Structured conflict ranges (migration 009) — enriches the panel's
   // conflicts display; degrades to empty pre-migration.
@@ -852,15 +880,37 @@ export default function AuditionsPage() {
           <div className="flex flex-col gap-6">
             {/* Actor header */}
             <div className="flex items-center gap-4 animate-fade-up">
-              <Avatar
-                name={selectedActor.displayName}
-                imageUrl={selectedActor.avatarUrl}
-                size="xl"
-              />
+              {panelLightboxPhotos.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setPanelLightboxIndex(0)}
+                  className="rounded-full ring-offset-2 hover:ring-2 hover:ring-stage-300 transition flex-shrink-0"
+                  title="View full-size photos"
+                  aria-label={`View ${selectedActor.displayName}'s photos full-screen`}
+                >
+                  <Avatar
+                    name={selectedActor.displayName}
+                    imageUrl={selectedActor.avatarUrl}
+                    size="xl"
+                  />
+                </button>
+              ) : (
+                <Avatar
+                  name={selectedActor.displayName}
+                  imageUrl={selectedActor.avatarUrl}
+                  size="xl"
+                />
+              )}
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h2 className="text-xl font-display text-curtain-900">
-                    {selectedActor.displayName}
+                    <Link
+                      href={`/actors/${selectedActor.id}`}
+                      className="hover:text-curtain-700 hover:underline decoration-stage-400 underline-offset-4 transition"
+                      title="Open full profile"
+                    >
+                      {selectedActor.displayName}
+                    </Link>
                   </h2>
                   {selectedActor.profile?.isMinor && (
                     <Badge variant="warning" size="sm">Minor</Badge>
@@ -1129,6 +1179,15 @@ export default function AuditionsPage() {
           </div>
         )}
       </SlidePanel>
+
+      {/* Headshot / gallery zoom from the slide panel (Lightbox sits at z-70,
+          above the panel's 40/50 layer per the modal-layering contract) */}
+      <Lightbox
+        photos={panelLightboxPhotos}
+        index={panelLightboxIndex}
+        onClose={() => setPanelLightboxIndex(null)}
+        onIndexChange={setPanelLightboxIndex}
+      />
 
       {/* ── Advance Phase Confirmation ── */}
       <Modal open={advanceConfirmOpen} onClose={() => setAdvanceConfirmOpen(false)} title="Close Auditions">

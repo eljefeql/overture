@@ -15,6 +15,7 @@ import { ShowCard } from "@/components/shows/ShowCard";
 import {
   Avatar,
   Card,
+  Pill,
   SectionHeader,
   PageSkeleton,
   EmptyState,
@@ -37,6 +38,7 @@ import {
   UsersThree,
   Armchair,
   CalendarStar,
+  SealCheck,
 } from "@phosphor-icons/react";
 import type { Show } from "@/types";
 
@@ -92,7 +94,9 @@ export default function TheatrePage() {
 
   if (isLoading) return <PageSkeleton />;
 
-  if (!org) {
+  // Archived theatres (platform-admin soft hide, migration 021) read as
+  // removed on the public surface — members still manage theirs via /org.
+  if (!org || org.isArchived) {
     return (
       <div className="max-w-2xl mx-auto px-6 py-8">
         <EmptyState
@@ -195,6 +199,17 @@ export default function TheatrePage() {
               </span>
             )}
           </div>
+          {/* Affiliations (migration 022) — badges near the hero */}
+          {(org.affiliations ?? []).length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {(org.affiliations ?? []).map((a) => (
+                <Pill key={a} variant="status" className="cursor-default">
+                  <SealCheck className="w-3.5 h-3.5 text-stage-500" weight="duotone" />
+                  {a}
+                </Pill>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

@@ -59,9 +59,11 @@ A feature being LOCKED does not freeze *bugs*: fixing a clearly-broken behavior 
 | Notifications (unread/read, mark-read, real unread nav badge) | **LOCKED** | |
 | Cast offers (agreements, confetti, guardian-bound consent for minors) | **LOCKED** | |
 | Profile (single scrolling page): vitals, bucket list, endorsements, acting credits, crew credits, training, awards, measurements, skills, minor/guardian card | **LOCKED** | |
-| Profile editing modals (Profile / Credit / CrewCredit / Training / Award) | **LOCKED** | |
+| Profile editing modals (Profile / Credit / CrewCredit / Training / Award) | **LOCKED** | Dance styles are curated chips + "Other" free-text since 2026-10-13 (`DanceStylesField`, same stored array, no DDL; also in onboarding Talent step). |
 | Photos (headshot, production gallery w/ captions, resume PDF via signed URLs) | **LOCKED** | Cloud-only; mock shows "Coming Soon". |
 | Share + Add-to-Calendar (.ics) on audition page | **LOCKED** | |
+| Viewable actor profiles `/actors/[actorId]` ((actor) group → auth-gated, any signed-in user; PUBLIC TIER ONLY per owner 2026-10-12: photo/name/pronouns/Minor badge/bio/vitals/credits/crew credits/skills/training/awards/bucket list/endorsements/gallery — NEVER contact, measurements, location/travel radius, dealbreakers, accessibility, guardian info, or resume. Linked from hub People, casting assign modal, auditions slide panel, callbacks lists; deliberately NOT from public audition attendee names) | **OPEN** | Built 2026-10-13, pending user verify. No new RLS needed (public-tier tables already authenticated-readable). |
+| Headshot hard nudge at audition signup ("Directors cast from faces…" panel w/ inline upload when the actor has no headshot; never blocks; mock shows cloud note) | **OPEN** | Built 2026-10-13 (owner decision: hard nudge, not a block), pending user verify. |
 | Availability toggle + Invite-to-Audition | **OPEN** | `isAvailable` renders a badge; nothing sets it. Deferred to comms layer. |
 
 ### Theatre / production side
@@ -89,6 +91,10 @@ A feature being LOCKED does not freeze *bugs*: fixing a clearly-broken behavior 
 | Manual past productions (merged with auto-derived) | **LOCKED** | |
 | Org member invitations + auto-accept at invitee's next sign-in (in-app) | **LOCKED** | Email delivery is OPEN (Resend). QA fix 2026-07-05: the invitee's typed name is stored (`org_invites.invited_name`, migration 014, in `PASTE_ME_NEXT.sql`) and shown on pending rows instead of the email prefix; degrades gracefully pre-paste. |
 | Archive show | **LOCKED** | |
+| Editable offer agreements (`shows.offer_agreements` jsonb, migration 022 — setup "Offer Agreements" card + edit modal, defaults = the previous fixed copy via `src/lib/offerAgreements.ts`; actor acceptance renders the show's list, guardian flow unchanged; retry-without-column pre-paste) | **OPEN** | Built 2026-10-13, pending user verify. |
+| Theatre affiliations (`orgs.affiliations` text[], migration 022 — chip input w/ EMACT/AACT/NETC suggestions in org edit; badges on public theatre hero + /org About) | **OPEN** | Built 2026-10-13, pending user verify. |
+| Platform admin `/admin` (standalone gated route; `is_platform_admin()` RPC over SQL-only `platform_admins` table, migration 021 — pasting grants the owner; non-admins get a 404-style state; Theatres/People/Shows directory w/ search + normalized-name duplicate badges; actions: `admin_update_org`/`admin_archive_org` (`orgs.is_archived` soft-hide, public surfaces exclude archived)/`admin_delete_org`/`admin_delete_user` (admins never deletable)/`admin_remove_org_member`, all SECURITY DEFINER + type-the-name confirms; per-user password-reset email. Mock: gate open, read-only, cloud-only toasts) | **OPEN** | Built 2026-10-13, pending user verify + 021 paste. Merge tooling deliberately deferred (P4). |
+| Duplicate-theatre guard at maker onboarding (`findSimilarOrgs`/`normalizeOrgName` in client.ts; warning card w/ "ask for an invite" guidance + "Create anyway" — never blocks; check failure = proceed) | **OPEN** | Built 2026-10-13, pending user verify. Full claim flow still P4. |
 
 ### Public layer
 | Feature | Status | Note |
