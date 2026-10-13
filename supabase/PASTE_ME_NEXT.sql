@@ -1,277 +1,345 @@
 -- ============================================================================
--- Overture 2.0 — Migration 021: platform admin ("god mode" v1)
+-- Overture 2.0 — Migration 023: Supplemental casting calls
 -- ============================================================================
--- QC Master List #28 (expanded scope, owner-approved 2026-10-13). Gives the
--- platform owner a /admin directory of every theatre / person / show, plus a
--- small set of guarded repair actions (edit org basics, archive, hard delete,
--- remove a stray membership, delete a user).
+-- SUPPLEMENTAL_AND_PRECAST_SPEC.md, Feature 1 (QC item 12) — wave 1.
 --
---   1. platform_admins — SQL-ONLY membership. RLS is on with NO insert /
---      update / delete policies at all: the ONLY way in or out of the admin
---      list is this file or the SQL editor. The single SELECT policy lets a
---      signed-in user see exactly their own row, so the app can ask "am I an
---      admin?" and learn nothing else.
---   2. is_platform_admin() — SECURITY DEFINER exists-check, used by the app
---      (one cheap RPC) and by every policy/function below.
---   3. Admin READ policies (additive) on org_members + shows. profiles and
---      orgs are already readable by every authenticated user (002), so the
---      directory needs nothing new there — deliberately NO new reach into
---      measurements / private-tier data.
---   4. orgs.is_archived — soft-hide for duplicate/abandoned theatres. The
---      app excludes archived orgs from the public surfaces (browse /
---      discover, landing strip, sitemap, public theatre page); nothing is
---      deleted and members still see their own org.
---   5. Admin ACTION functions, each SECURITY DEFINER + is_platform_admin()
---      guard, EXECUTE revoked from anon/public and granted to authenticated:
---        admin_update_org(org_id, name, city, state)  — basic fixes
---        admin_archive_org(org_id, archived)          — soft hide / restore
---        admin_delete_org(org_id)                     — HARD delete, cascades
---        admin_delete_user(user_id)                   — deletes the auth.users
---                                                       row (like
---                                                       delete_my_account, but
---                                                       admin-targeted); a
---                                                       platform admin can
---                                                       NEVER be deleted
---        admin_remove_org_member(member_row_id)       — remove one membership
+-- A supplemental casting call is a role-scoped mini-audition for a show past
+-- auditions_closed (callbacks/casting/cast/archived). It rides the EXISTING
+-- audition_groups + audition_signups machinery — a call is simply one or more
+-- audition_groups rows flagged `supplemental`, targeting specific roles:
 --
--- GRANTING / REVOKING ADMIN (SQL editor only — there is deliberately no UI):
+--   supplemental            — marks the block as part of a casting call
+--   target_role_ids         — the role(s) the call is seeking (uuid[] into
+--                             show_roles; roles are removed as they fill)
+--   supplemental_note       — optional public note ("seeking a strong tenor")
+--   supplemental_closed_at  — null = the call is OPEN (public page reframes,
+--                             show reappears on Browse/Discover); set = closed
 --
---   Grant:   INSERT INTO public.platform_admins (user_id)
---            VALUES ('<uuid>') ON CONFLICT DO NOTHING;
---   By email: INSERT INTO public.platform_admins (user_id)
---             SELECT id FROM auth.users WHERE lower(email) = lower('<email>')
---             ON CONFLICT (user_id) DO NOTHING;
---   Revoke:  DELETE FROM public.platform_admins WHERE user_id = '<uuid>';
+-- Because these are plain audition_groups columns, everything downstream is
+-- automatic: signups land in audition_signups and show on the auditions board,
+-- the send-reminders cron's T-24h/T-2h audition scan picks the blocks up with
+-- no changes, and the existing RLS carries over (anon can read groups of
+-- non-setup shows per 003; only the show team can insert/update).
 --
--- Pasting this file makes Christopher (the platform owner) the first admin —
--- see the guarded INSERT at the bottom (it no-ops on a project where that
--- uuid doesn't exist; use the by-email grant above instead).
+-- AUTO-CLOSE: when a targeted (non-ensemble) role gains an ACCEPTED primary
+-- assignment, the trigger below removes that role from every open call's
+-- target list, and closes the call when no sought roles remain. SECURITY
+-- DEFINER because the acceptance is written by the ACTOR, whose RLS cannot
+-- update audition_groups. Ensemble/featured_ensemble roles never auto-close —
+-- an ensemble pot can always take more members (manual close only).
+--
+-- Idempotent — safe to paste more than once.
+-- Apply in: Supabase Dashboard → SQL Editor → paste → Run (staging AND prod).
+
+ALTER TABLE audition_groups
+  ADD COLUMN IF NOT EXISTS supplemental boolean NOT NULL DEFAULT false;
+ALTER TABLE audition_groups
+  ADD COLUMN IF NOT EXISTS target_role_ids uuid[] NOT NULL DEFAULT '{}';
+ALTER TABLE audition_groups
+  ADD COLUMN IF NOT EXISTS supplemental_note text;
+ALTER TABLE audition_groups
+  ADD COLUMN IF NOT EXISTS supplemental_closed_at timestamptz;
+
+-- Fast lookup of shows with an open call (Browse/Discover reappearance).
+CREATE INDEX IF NOT EXISTS idx_audition_groups_open_supplemental
+  ON audition_groups (show_id)
+  WHERE supplemental AND supplemental_closed_at IS NULL;
+
+-- ── Auto-close on offer acceptance ──────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.close_supplemental_calls_on_acceptance()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- Only an accepted PRIMARY assignment fills a role; understudies/alternates
+  -- don't. Ensemble-type roles are pots — they never auto-close a call.
+  IF NEW.status = 'accepted'
+     AND NEW.assignment_type = 'primary'
+     AND NOT EXISTS (
+       SELECT 1 FROM show_roles r
+       WHERE r.id = NEW.role_id
+         AND r.role_type IN ('ensemble', 'featured_ensemble')
+     )
+  THEN
+    UPDATE audition_groups g
+    SET target_role_ids = array_remove(g.target_role_ids, NEW.role_id),
+        supplemental_closed_at = CASE
+          WHEN array_remove(g.target_role_ids, NEW.role_id) = '{}'::uuid[]
+            THEN now()
+          ELSE g.supplemental_closed_at
+        END
+    WHERE g.show_id = NEW.show_id
+      AND g.supplemental
+      AND g.supplemental_closed_at IS NULL
+      AND NEW.role_id = ANY (g.target_role_ids);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_close_supplemental_calls ON cast_assignments;
+CREATE TRIGGER trg_close_supplemental_calls
+  AFTER INSERT OR UPDATE OF status ON cast_assignments
+  FOR EACH ROW
+  EXECUTE FUNCTION public.close_supplemental_calls_on_acceptance();
+-- ============================================================================
+-- Overture 2.0 — Migration 024: Already-cast shows (modular adoption)
+-- ============================================================================
+-- SUPPLEMENTAL_AND_PRECAST_SPEC.md, Feature 2 (QC item 27) — wave 2.
+-- Prerequisites: migrations through 023 (needs 011's guest_emails + 020's
+-- kind/link_url columns, 015's is_show_manager).
+--
+-- A theatre that has ALREADY cast a show offline answers one question at
+-- create time and gets straight to the Show Hub: bulk-add the cast (role +
+-- name + email), batch-send warm invitation emails, publish → status 'cast'.
+--
+--   1. shows.precast — the create-screen answer ("We've already cast it").
+--      Drives the reordered checklist + module-aware subnav. Never changes
+--      the status machine: a precast show still travels setup → cast via the
+--      existing publish semantics.
+--
+--   2. cast_assignments grows the GUEST pattern (mirrors show_team_members'
+--      guest_name/guest_email — the established "person without an account"
+--      shape):
+--        actor_id         — now NULLABLE: null = invited by email, no
+--                           account yet. Every existing policy keys on
+--                           actor_id = auth.uid(), which a NULL never
+--                           matches, so guests are visible only to the
+--                           people who can already see the show's
+--                           assignments (managers + castmates per 019).
+--        guest_name       — display name typed by the director
+--        guest_email      — the email the invitation goes to; signing up
+--                           with it auto-links (claim_cast_assignments)
+--        added_directly   — honesty flag: this assignment was entered by
+--                           the director (status 'accepted', no offer
+--                           dance), not accepted through an Overture offer
+--        invited_at       — set when "Review & send invitations" fires;
+--                           null = not invited yet (typo protection: rows
+--                           NEVER email on save)
+--      A CHECK keeps every row attached to someone: actor_id or guest_email.
+--
+--   3. send_cast_invites(show_id) — the batch "Review & send invitations"
+--      confirm. For each un-invited direct-add row:
+--        · linked account  → in-app notification (untagged → always emails
+--          via the notifications webhook, correct for a transactional
+--          invite — same choice as notify_org_invite)
+--        · guest           → warm invite email via the guest_emails queue
+--          (kind 'cast_invite', delivered by the send-reminders cron ≤15
+--          min, idempotent via dedupe_key 'cast_invite:<assignment id>')
+--      Marks invited_at either way. Manager-gated; SECURITY DEFINER because
+--      guest_emails is service-role-only by design.
+--
+--   4. claim_cast_assignments() — auto-link at sign-in/sign-up (mirrors
+--      claim_volunteer_signups; wired into claimPendingInvites in client.ts
+--      alongside claim_org_invites + claim_volunteer_signups). Sets actor_id
+--      on guest rows matching the new account's email and tells the show
+--      team someone joined. guest_* fields are kept for history (same as
+--      volunteer claims).
+--
+-- Cast visibility note (019): the castmate read policy keys on shows.status
+-- IN ('cast','archived'). Precast shows reach 'cast' through the same
+-- publishCastList path as everyone else, so published precast casts are
+-- visible to production members with no policy change.
 --
 -- Idempotent — safe to paste more than once.
 -- Apply in: Supabase Dashboard → SQL Editor → paste → Run (staging AND prod).
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
--- 1. platform_admins — SQL-only membership
+-- 1. shows.precast
 -- ----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS platform_admins (
-  user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-ALTER TABLE platform_admins ENABLE ROW LEVEL SECURITY;
-
--- The ONLY policy: see your own row ("am I an admin?"). No INSERT / UPDATE /
--- DELETE policies exist on purpose — membership changes happen in SQL only.
-DROP POLICY IF EXISTS "Users can see their own admin row" ON platform_admins;
-CREATE POLICY "Users can see their own admin row"
-  ON platform_admins FOR SELECT
-  USING (user_id = auth.uid());
+ALTER TABLE shows ADD COLUMN IF NOT EXISTS precast boolean NOT NULL DEFAULT false;
 
 -- ----------------------------------------------------------------------------
--- 2. is_platform_admin() — the one check everything else keys off
+-- 2. cast_assignments — guest pattern + direct-add honesty flag
 -- ----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.is_platform_admin()
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM platform_admins WHERE user_id = auth.uid()
-  );
+ALTER TABLE cast_assignments ALTER COLUMN actor_id DROP NOT NULL;
+ALTER TABLE cast_assignments ADD COLUMN IF NOT EXISTS guest_name text;
+ALTER TABLE cast_assignments ADD COLUMN IF NOT EXISTS guest_email text;
+ALTER TABLE cast_assignments ADD COLUMN IF NOT EXISTS added_directly boolean NOT NULL DEFAULT false;
+ALTER TABLE cast_assignments ADD COLUMN IF NOT EXISTS invited_at timestamptz;
+
+-- Every assignment belongs to SOMEONE — a linked account or an invited email.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'cast_assignments_actor_or_guest'
+      AND conrelid = 'cast_assignments'::regclass
+  ) THEN
+    ALTER TABLE cast_assignments
+      ADD CONSTRAINT cast_assignments_actor_or_guest
+      CHECK (actor_id IS NOT NULL OR guest_email IS NOT NULL);
+  END IF;
+END;
 $$;
 
-REVOKE ALL ON FUNCTION public.is_platform_admin() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.is_platform_admin() TO authenticated;
+-- Fast email lookup for the claim function.
+CREATE INDEX IF NOT EXISTS idx_cast_assignments_guest_email
+  ON cast_assignments (lower(guest_email))
+  WHERE actor_id IS NULL AND guest_email IS NOT NULL;
 
 -- ----------------------------------------------------------------------------
--- 3. Admin READ policies (additive — never replace existing ones)
---    profiles + orgs are already authenticated-readable (002); the directory
---    additionally needs every membership row and setup-draft shows.
+-- 3. send_cast_invites — the batch "Review & send invitations" confirm.
+--    Never called on row save; the app calls it ONLY from the explicit
+--    confirm button (owner decision: typo protection).
 -- ----------------------------------------------------------------------------
-DROP POLICY IF EXISTS "Platform admins can read all org members" ON org_members;
-CREATE POLICY "Platform admins can read all org members"
-  ON org_members FOR SELECT
-  USING (is_platform_admin());
-
-DROP POLICY IF EXISTS "Platform admins can read all shows" ON shows;
-CREATE POLICY "Platform admins can read all shows"
-  ON shows FOR SELECT
-  USING (is_platform_admin());
-
--- ----------------------------------------------------------------------------
--- 4. orgs.is_archived — soft-hide a theatre from the public surfaces
--- ----------------------------------------------------------------------------
-ALTER TABLE orgs ADD COLUMN IF NOT EXISTS is_archived boolean NOT NULL DEFAULT false;
-
--- ----------------------------------------------------------------------------
--- 5. Admin ACTION functions
--- ----------------------------------------------------------------------------
-
--- 5a. Basic fixes: rename / correct city & state. Name only updates when a
---     non-blank value is passed; city/state may be cleared with ''.
-CREATE OR REPLACE FUNCTION public.admin_update_org(
-  p_org_id uuid,
-  p_name text,
-  p_city text,
-  p_state text
-)
-RETURNS void
+CREATE OR REPLACE FUNCTION public.send_cast_invites(p_show_id uuid)
+RETURNS integer
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+DECLARE
+  v_row record;
+  v_show_title text;
+  v_org_name text;
+  v_recipient uuid;
+  v_count integer := 0;
 BEGIN
-  IF NOT is_platform_admin() THEN
-    RAISE EXCEPTION 'Platform admins only';
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+  IF NOT is_show_manager(p_show_id) THEN
+    RAISE EXCEPTION 'Only the show team or theatre admins can send cast invitations';
   END IF;
 
-  UPDATE orgs
-     SET name = coalesce(nullif(btrim(p_name), ''), name),
-         city = nullif(btrim(coalesce(p_city, '')), ''),
-         state = nullif(btrim(coalesce(p_state, '')), ''),
-         updated_at = now()
-   WHERE id = p_org_id;
+  SELECT s.title, o.name INTO v_show_title, v_org_name
+    FROM shows s JOIN orgs o ON o.id = s.org_id
+   WHERE s.id = p_show_id;
+  IF v_show_title IS NULL THEN
+    RAISE EXCEPTION 'Show not found';
+  END IF;
+
+  FOR v_row IN
+    SELECT ca.id, ca.actor_id, ca.guest_name, ca.guest_email, r.name AS role_name
+      FROM cast_assignments ca
+      JOIN show_roles r ON r.id = ca.role_id
+     WHERE ca.show_id = p_show_id
+       AND ca.added_directly
+       AND ca.invited_at IS NULL
+       AND ca.status = 'accepted'
+  LOOP
+    -- An account may have appeared since the row was added (same re-check
+    -- notify_org_invite does) — link it now so the invite lands in-app.
+    v_recipient := v_row.actor_id;
+    IF v_recipient IS NULL AND v_row.guest_email IS NOT NULL THEN
+      SELECT id INTO v_recipient
+        FROM profiles WHERE lower(email) = lower(v_row.guest_email);
+      IF v_recipient IS NOT NULL THEN
+        UPDATE cast_assignments SET actor_id = v_recipient WHERE id = v_row.id;
+      END IF;
+    END IF;
+
+    IF v_recipient IS NOT NULL THEN
+      -- Existing Overture user → in-app notification; email rides the
+      -- notifications → send-notification-email webhook (untagged = sent).
+      INSERT INTO notifications (user_id, type, title, body, show_title, link_url)
+      VALUES (
+        v_recipient,
+        'cast',
+        'You''re in the cast!',
+        'You''ve been added to the cast of ' || v_show_title ||
+          ' at ' || coalesce(v_org_name, 'the theatre') ||
+          coalesce(' as ' || v_row.role_name, '') ||
+          '. Find your schedule and announcements in My Shows.',
+        v_show_title,
+        '/my-shows'
+      );
+    ELSIF v_row.guest_email IS NOT NULL THEN
+      -- No account yet → queue a warm invite email. Sent by the
+      -- send-reminders cron via Resend (≤15 min); dedupe_key makes repeat
+      -- sends harmless.
+      INSERT INTO guest_emails
+        (to_email, to_name, subject, body, show_title, kind, link_url, dedupe_key)
+      VALUES (
+        lower(btrim(v_row.guest_email)),
+        nullif(btrim(coalesce(v_row.guest_name, '')), ''),
+        'You''ve been added to the cast of ' || v_show_title,
+        'Congratulations! You''ve been added to the cast of ' || v_show_title ||
+          ' at ' || coalesce(v_org_name, 'the theatre') ||
+          coalesce(' as ' || v_row.role_name, '') ||
+          '. Create your free Overture account with this email address and' ||
+          ' you''ll be connected to the show automatically — your schedule,' ||
+          ' announcements, and castmates all in one place.',
+        v_show_title,
+        'cast_invite',
+        '/signup?next=/my-shows',
+        'cast_invite:' || v_row.id
+      )
+      ON CONFLICT (dedupe_key) DO NOTHING;
+    ELSE
+      CONTINUE; -- nothing to send to (shouldn't happen under the CHECK)
+    END IF;
+
+    UPDATE cast_assignments SET invited_at = now() WHERE id = v_row.id;
+    v_count := v_count + 1;
+  END LOOP;
+
+  RETURN v_count;
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.admin_update_org(uuid, text, text, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.admin_update_org(uuid, text, text, text) TO authenticated;
-
--- 5b. Archive / restore (soft hide from public surfaces; nothing is deleted).
-CREATE OR REPLACE FUNCTION public.admin_archive_org(
-  p_org_id uuid,
-  p_archived boolean
-)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  IF NOT is_platform_admin() THEN
-    RAISE EXCEPTION 'Platform admins only';
-  END IF;
-
-  UPDATE orgs
-     SET is_archived = coalesce(p_archived, false),
-         updated_at = now()
-   WHERE id = p_org_id;
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.admin_archive_org(uuid, boolean) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.admin_archive_org(uuid, boolean) TO authenticated;
-
--- 5c. HARD delete a theatre. Cascades per 001: shows, members, invites,
---     venues, photos rows, past productions, signups on its shows, etc.
---     Storage objects (logo / org-media) orphan — same accepted trade-off as
---     delete_my_account. Member ACCOUNTS are untouched.
-CREATE OR REPLACE FUNCTION public.admin_delete_org(p_org_id uuid)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  IF NOT is_platform_admin() THEN
-    RAISE EXCEPTION 'Platform admins only';
-  END IF;
-
-  DELETE FROM orgs WHERE id = p_org_id;
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.admin_delete_org(uuid) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.admin_delete_org(uuid) TO authenticated;
-
--- 5d. Delete a user account — the admin-targeted twin of delete_my_account
---     (012): removes the auth.users row, which cascades to profiles and from
---     there through everything that references profiles. Storage objects
---     orphan. A platform admin can NEVER be deleted this way (revoke their
---     admin row in SQL first if that's really intended).
-CREATE OR REPLACE FUNCTION public.admin_delete_user(p_user_id uuid)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  IF NOT is_platform_admin() THEN
-    RAISE EXCEPTION 'Platform admins only';
-  END IF;
-  IF EXISTS (SELECT 1 FROM platform_admins WHERE user_id = p_user_id) THEN
-    RAISE EXCEPTION 'Platform admins can never be deleted';
-  END IF;
-
-  DELETE FROM auth.users WHERE id = p_user_id;
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.admin_delete_user(uuid) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.admin_delete_user(uuid) TO authenticated;
-
--- 5e. Remove one org membership row (e.g. someone stuck in a duplicate org).
-CREATE OR REPLACE FUNCTION public.admin_remove_org_member(p_member_row_id uuid)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  IF NOT is_platform_admin() THEN
-    RAISE EXCEPTION 'Platform admins only';
-  END IF;
-
-  DELETE FROM org_members WHERE id = p_member_row_id;
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.admin_remove_org_member(uuid) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.admin_remove_org_member(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.send_cast_invites(uuid) TO authenticated;
 
 -- ----------------------------------------------------------------------------
--- 6. First admin: Christopher (platform owner). Guarded SELECT so the paste
---    still succeeds on a project where this uuid doesn't exist — grant by
---    email there instead (see the header comment).
+-- 4. claim_cast_assignments — auto-link at sign-in/sign-up (email match).
+--    Mirrors claim_volunteer_signups; guest_* kept for history.
 -- ----------------------------------------------------------------------------
-INSERT INTO public.platform_admins (user_id)
-SELECT id FROM auth.users WHERE id = 'd03b6500-86cb-4d47-aac5-cc649f8cac93'
-ON CONFLICT (user_id) DO NOTHING;
--- ============================================================================
--- Overture 2.0 — Migration 022: editable offer agreements + theatre affiliations
--- ============================================================================
--- QC master list items 25 + 24 (owner-approved 2026-10-12).
---
--- 25 · shows.offer_agreements (jsonb) — the commitments an actor checks off
---     when accepting a cast offer. An array of strings; each string's FIRST
---     LINE renders as the agreement title, the rest as its body. NULL (or
---     empty) means "use Overture's defaults" — the exact copy that was
---     hard-coded in the offer page until now — so every existing show keeps
---     behaving identically. Edited from the show setup page ("Offer
---     Agreements" card); the app writes the column with a retry-without-column
---     fallback (updateShow), so saves never fail before this is pasted.
---
--- 24 · orgs.affiliations (text[]) — organizations the theatre belongs to
---     (EMACT, AACT, NETC, or anything typed free-form). Edited in the org
---     page's Edit Theatre modal (chip input); displayed as badges near the
---     public theatre page hero. Same retry-without-column fallback (updateOrg).
---
--- No RLS changes: both columns ride their tables' existing policies
--- (shows are publicly readable past setup; orgs are publicly readable;
--- writes stay owner/team-gated exactly as before).
---
--- Item 21 (viewable actor profiles) needs NO DDL — profiles, actor_details,
--- training, awards, production_credits, endorsements, bucket_list_shows and
--- profile_photos are already SELECT-able by all authenticated users (002/003/
--- storage_setup), which is exactly the public-tier read the new /actors/[id]
--- page performs. Measurements/contact stay gated and are never rendered there.
---
--- Idempotent — safe to paste more than once.
--- Apply in: Supabase Dashboard → SQL Editor → paste → Run (staging AND prod).
+CREATE OR REPLACE FUNCTION public.claim_cast_assignments()
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_user uuid := auth.uid();
+  v_email text;
+  v_name text;
+  v_row record;
+  v_count integer := 0;
+BEGIN
+  IF v_user IS NULL THEN
+    RETURN 0;
+  END IF;
+  SELECT email, display_name INTO v_email, v_name
+    FROM profiles WHERE id = v_user;
+  IF v_email IS NULL THEN
+    RETURN 0;
+  END IF;
 
-ALTER TABLE shows ADD COLUMN IF NOT EXISTS offer_agreements jsonb;
+  FOR v_row IN
+    SELECT ca.id, ca.show_id, s.title AS show_title
+      FROM cast_assignments ca
+      JOIN shows s ON s.id = ca.show_id
+     WHERE ca.actor_id IS NULL
+       AND lower(ca.guest_email) = lower(v_email)
+  LOOP
+    UPDATE cast_assignments SET actor_id = v_user WHERE id = v_row.id;
+    v_count := v_count + 1;
 
-ALTER TABLE orgs ADD COLUMN IF NOT EXISTS affiliations text[] NOT NULL DEFAULT '{}';
+    -- Tell the show team their cast member joined — best-effort.
+    BEGIN
+      INSERT INTO notifications (user_id, type, title, body, show_title, link_url)
+      SELECT tm.user_id, 'system',
+             'Cast member joined',
+             coalesce(nullif(v_name, ''), v_email) ||
+               ' created their account and is now connected to ' ||
+               v_row.show_title || '.',
+             v_row.show_title,
+             '/shows/' || v_row.show_id || '/hub'
+        FROM show_team_members tm
+       WHERE tm.show_id = v_row.show_id
+         AND tm.user_id IS NOT NULL
+         AND tm.user_id <> v_user;
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+  END LOOP;
+
+  RETURN v_count;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.claim_cast_assignments() TO authenticated;

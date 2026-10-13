@@ -736,6 +736,44 @@ export const shows: Show[] = [
     createdAt: "2025-11-15T00:00:00Z",
     updatedAt: "2026-03-10T00:00:00Z",
   },
+  {
+    // ── ALREADY-CAST SHOW (spec Feature 2, migration 024) ──
+    // Cast offline before NCT joined Overture — answers "We've already cast
+    // it" at create. Demos the precast loop: reordered checklist, bulk add
+    // (one member already linked, one invited guest), Review & send
+    // invitations, then "Publish Cast & Open the Hub".
+    id: "show-14",
+    orgId: "org-1",
+    orgName: "North County Theatre",
+    title: "The Fantasticks",
+    authorInfo: "Music: Harvey Schmidt, Book & Lyrics: Tom Jones",
+    showType: "musical",
+    season: "2026-2027",
+    status: "setup",
+    precast: true,
+    auditionStart: null,
+    auditionEnd: null,
+    callbackDate: null,
+    callbackStartTime: null,
+    callbackEndTime: null,
+    rehearsalStart: "2026-11-02",
+    showOpen: "2026-12-11",
+    showClose: "2026-12-20",
+    auditionLocation: null,
+    auditionNotes: null,
+    callbackLocation: null,
+    callbackNotes: null,
+    performanceLocation: "NCT Studio Theatre, 1240 Oak Ave, Riverside",
+    callbackContactName: null,
+    callbackContactPhone: null,
+    posterUrl: null,
+    city: "Riverside",
+    state: "CA",
+    distanceMiles: 3,
+    isPromoted: false,
+    createdAt: "2026-10-01T00:00:00Z",
+    updatedAt: "2026-10-01T00:00:00Z",
+  },
 ];
 
 // ============================================================
@@ -940,6 +978,17 @@ export const ourTownRoles: ShowRole[] = [
 ];
 
 // ============================================================
+// SHOW ROLES — The Fantasticks (show-14, ALREADY-CAST demo)
+// Roles here were "created on the fly" by the bulk-add — more
+// appear as you add rows with new role names.
+// ============================================================
+
+export const fantasticksRoles: ShowRole[] = [
+  { id: "role-fa1", showId: "show-14", name: "El Gallo", roleType: "lead", gender: "any", ageRange: null, vocalRange: null, description: null, sortOrder: 0 },
+  { id: "role-fa2", showId: "show-14", name: "Luisa", roleType: "supporting", gender: "any", ageRange: null, vocalRange: null, description: null, sortOrder: 1 },
+];
+
+// ============================================================
 // ALL SHOW ROLES — master lookup
 // ============================================================
 
@@ -957,6 +1006,7 @@ export const allShowRoles: Record<string, ShowRole[]> = {
   "show-11": rentRoles,
   "show-12": noisesOffRoles,
   "show-13": ourTownRoles,
+  "show-14": fantasticksRoles,
 };
 
 // ============================================================
@@ -976,6 +1026,9 @@ export const showTeam: ShowTeamMember[] = [
   { id: "tm-7", showId: "show-2", userId: "user-team-5", userName: "Marcus Webb", role: "music_director", canEvaluate: true, email: "marcus.webb@nctmail.org", phone: "(951) 555-0105" },
   { id: "tm-8", showId: "show-2", userId: "user-team-3", userName: "Angela Davis", role: "choreographer", canEvaluate: true, email: "angela.davis@nctmail.org", phone: null },
   { id: "tm-9", showId: "show-2", userId: "user-team-4", userName: "James Thornton", role: "producer", canEvaluate: false, email: "james.thornton@nctmail.org", phone: null },
+
+  // ── The Fantasticks (show-14) — ALREADY-CAST demo, NCT team ──
+  { id: "tm-52", showId: "show-14", userId: "user-team-1", userName: "Sarah Mitchell", role: "director", canEvaluate: true, email: "sarah.mitchell@nctmail.org", phone: "(951) 555-0101" },
 
   // ── Little Shop of Horrors (show-3) — City Light team ──
   { id: "tm-10", showId: "show-3", userId: "user-team-8", userName: "Rachel Kim", role: "director", canEvaluate: true, email: "rachel.kim@citylighttheatre.org", phone: "(408) 555-0198" },
@@ -1209,4 +1262,13 @@ export const castAssignments: CastAssignment[] = [
   { id: "ca-68", showId: "show-13", roleId: "role-ot6", roleName: "Mr. Webb", actorId: "actor-20", actorName: "Greg Nakamura", assignmentType: "primary", status: "accepted", sortOrder: 0 },
   { id: "ca-69", showId: "show-13", roleId: "role-ot7", roleName: "Mrs. Webb", actorId: "actor-10", actorName: "Tamika Jones", assignmentType: "primary", status: "accepted", sortOrder: 0 },
   { id: "ca-70", showId: "show-13", roleId: "role-ot8", roleName: "Simon Stimson", actorId: "actor-14", actorName: "Kevin Pham", assignmentType: "primary", status: "accepted", sortOrder: 0 },
+
+  // ── The Fantasticks (show-14) — ALREADY-CAST demo (spec Feature 2) ──
+  // Director-entered cast: Maria has an Overture account (linked at add
+  // time → "Joined"); Dana was added by email only (guest — no account
+  // until she signs up with that address and claim_cast_assignments links
+  // her). Neither has been invited yet, so "Review & send invitations"
+  // demos immediately.
+  { id: "ca-71", showId: "show-14", roleId: "role-fa1", roleName: "El Gallo", actorId: "actor-2", actorName: "Maria Santos", assignmentType: "primary", status: "accepted", sortOrder: 0, addedDirectly: true, guestName: null, guestEmail: null, invitedAt: null },
+  { id: "ca-72", showId: "show-14", roleId: "role-fa2", roleName: "Luisa", actorId: null, actorName: "Dana Whitcomb", assignmentType: "primary", status: "accepted", sortOrder: 0, addedDirectly: true, guestName: "Dana Whitcomb", guestEmail: "dana.whitcomb@example.com", invitedAt: null },
 ];

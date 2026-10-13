@@ -10,6 +10,8 @@ import {
   getAuditionGroups,
   getAuditionSignups,
   getCallbacks,
+  getCastAssignments,
+  publishCastList,
   updateShow,
   createShowRole,
   updateShowRole,
@@ -21,6 +23,7 @@ import {
   deleteAuditionGroup,
 } from "@/lib/api/client";
 import { uploadShowPoster } from "@/lib/api/photos";
+import { PrecastCastSection } from "@/components/shows/PrecastCastSection";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { track } from "@/lib/analytics";
 import {
@@ -164,6 +167,8 @@ export default function ShowSetupPage() {
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [callbackOpen, setCallbackOpen] = useState(false);
   const [agreementsOpen, setAgreementsOpen] = useState(false);
+  // Precast shows (spec Feature 2): "Publish Cast & Open the Hub" confirm.
+  const [publishOpen, setPublishOpen] = useState(false);
 
   // Offer agreements editor — one textarea per agreement (first line = title).
   const [agreementsDraft, setAgreementsDraft] = useState<string[]>([]);
@@ -210,15 +215,16 @@ export default function ShowSetupPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["showSetup", showId],
     queryFn: async () => {
-      const [show, roles, team, groups, signups, cbs] = await Promise.all([
+      const [show, roles, team, groups, signups, cbs, assignments] = await Promise.all([
         getShow(showId),
         getShowRoles(showId),
         getShowTeam(showId),
         getAuditionGroups(showId),
         getAuditionSignups(showId),
         getCallbacks(showId),
+        getCastAssignments(showId),
       ]);
-      return { show, roles, team, groups, signups, callbacks: cbs };
+      return { show, roles, team, groups, signups, callbacks: cbs, assignments };
     },
   });
 
@@ -233,6 +239,25 @@ export default function ShowSetupPage() {
       toast("success", "Show status updated!");
       setConfirmOpen(false);
       setStepBackOpen(false);
+    },
+    onError: (err: Error) => toast("error", err.message),
+  });
+
+  // Precast publish — reuses the cast-list publish semantics exactly
+  // (publishCastList validates every active assignment is accepted — direct
+  // adds are — and flips the show to 'cast'), so migration 019's castmate
+  // visibility and every other status-keyed behavior Just Works.
+  const publishCastMutation = useMutation({
+    mutationFn: () => publishCastList(showId),
+    onSuccess: () => {
+      track("cast_list_published", { showId });
+      queryClient.invalidateQueries({ queryKey: ["showSetup", showId] });
+      queryClient.invalidateQueries({ queryKey: ["show", showId] });
+      queryClient.invalidateQueries({ queryKey: ["shows"] });
+      queryClient.invalidateQueries({ queryKey: ["castAssignments", showId] });
+      toast("success", "Cast published — your Show Hub is live!");
+      setPublishOpen(false);
+      router.push(`/shows/${showId}/hub`);
     },
     onError: (err: Error) => toast("error", err.message),
   });
@@ -358,8 +383,12 @@ export default function ShowSetupPage() {
     </div>
   );
 
-  const { show, roles, team, groups, signups, callbacks: cbs } = data;
-  const nextAction = NEXT_STATUS[show.status];
+  const { show, roles, team, groups, signups, callbacks: cbs, assignments } = data;
+  const isPrecast = !!show.precast;
+  // Precast shows never "open auditions" from setup — their forward action is
+  // "Publish Cast & Open the Hub" (publishCastList). Every other status keeps
+  // the standard machine (a precast show in 'cast' archives like any other).
+  const nextAction = isPrecast && show.status === "setup" ? undefined : NEXT_STATUS[show.status];
   const backAction = PREV_STATUS[show.status];
 
   // ── Checklist state (only meaningful while the show is being set up) ──
@@ -367,14 +396,29 @@ export default function ShowSetupPage() {
   const hasTeam = team.length > 1; // creator counts as one; >1 means they invited someone
   const hasSchedule = groups.length > 0;
   const isLive = show.status !== "setup";
+  const activeCast = assignments.filter(
+    (a) => a.status !== "withdrawn" && a.status !== "declined"
+  );
+  const hasCast = activeCast.length > 0;
+  const scrollToCast = () =>
+    document.getElementById("precast-cast-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
   // "Open auditions" is the final step — done once the show has left setup.
-  const checklistSteps = [
-    { key: "created", label: "Show created", done: true, optional: false, action: null as null | (() => void), cta: "" },
-    { key: "roles", label: "Add roles", done: hasRoles, optional: false, action: () => setAddRoleOpen(true), cta: hasRoles ? "Add more" : "Add a role" },
-    { key: "team", label: "Build your team", done: hasTeam, optional: true, action: () => setAddMemberOpen(true), cta: hasTeam ? "Manage" : "Invite" },
-    { key: "schedule", label: "Schedule auditions", done: hasSchedule, optional: false, action: () => setAddSlotOpen(true), cta: hasSchedule ? "Add a day" : "Schedule" },
-    { key: "open", label: "Open auditions", done: isLive, optional: false, action: () => setConfirmOpen(true), cta: "Open" },
-  ];
+  // Precast shows (spec Feature 2) reorder: Add your cast → Build your team →
+  // Hub live. No audition scheduling steps.
+  const checklistSteps = isPrecast
+    ? [
+        { key: "created", label: "Show created", done: true, optional: false, action: null as null | (() => void), cta: "" },
+        { key: "cast", label: "Add your cast", done: hasCast, optional: false, action: scrollToCast, cta: hasCast ? "Add more" : "Add your cast" },
+        { key: "team", label: "Build your team", done: hasTeam, optional: true, action: () => setAddMemberOpen(true), cta: hasTeam ? "Manage" : "Invite" },
+        { key: "open", label: "Publish cast & open the Hub", done: isLive, optional: false, action: () => setPublishOpen(true), cta: "Publish" },
+      ]
+    : [
+        { key: "created", label: "Show created", done: true, optional: false, action: null as null | (() => void), cta: "" },
+        { key: "roles", label: "Add roles", done: hasRoles, optional: false, action: () => setAddRoleOpen(true), cta: hasRoles ? "Add more" : "Add a role" },
+        { key: "team", label: "Build your team", done: hasTeam, optional: true, action: () => setAddMemberOpen(true), cta: hasTeam ? "Manage" : "Invite" },
+        { key: "schedule", label: "Schedule auditions", done: hasSchedule, optional: false, action: () => setAddSlotOpen(true), cta: hasSchedule ? "Add a day" : "Schedule" },
+        { key: "open", label: "Open auditions", done: isLive, optional: false, action: () => setConfirmOpen(true), cta: "Open" },
+      ];
   const requiredDone = checklistSteps.filter((s) => !s.optional && s.done).length;
   const requiredTotal = checklistSteps.filter((s) => !s.optional).length;
 
@@ -716,6 +760,14 @@ export default function ShowSetupPage() {
               Step back
             </Button>
           )}
+          {isPrecast && show.status === "setup" && (
+            <Button
+              onClick={() => setPublishOpen(true)}
+              icon={<Play className="w-4 h-4" weight="bold" />}
+            >
+              Publish Cast &amp; Open the Hub
+            </Button>
+          )}
           {nextAction && (
             <Button
               onClick={() => setConfirmOpen(true)}
@@ -740,7 +792,9 @@ export default function ShowSetupPage() {
             </span>
           </CardHeader>
           <p className="text-sm text-clay-500 -mt-2 mb-4">
-            Nothing here is public until you open auditions. Work through these at your own pace.
+            {isPrecast
+              ? "Your show already has its cast — add everyone below, then publish to open your Show Hub. Nothing is public in the meantime."
+              : "Nothing here is public until you open auditions. Work through these at your own pace."}
           </p>
           <div className="flex flex-col gap-2">
             {checklistSteps.map((step) => (
@@ -765,9 +819,9 @@ export default function ShowSetupPage() {
                   step.key === "open" ? (
                     <Button
                       size="sm"
-                      variant={hasRoles && hasSchedule ? "primary" : "outline"}
+                      variant={(isPrecast ? hasCast : hasRoles && hasSchedule) ? "primary" : "outline"}
                       onClick={step.action}
-                      icon={<Megaphone className="w-4 h-4" weight={hasRoles && hasSchedule ? "bold" : "duotone"} />}
+                      icon={<Megaphone className="w-4 h-4" weight={(isPrecast ? hasCast : hasRoles && hasSchedule) ? "bold" : "duotone"} />}
                     >
                       {step.cta}
                     </Button>
@@ -784,13 +838,23 @@ export default function ShowSetupPage() {
       )}
 
       {/* ── Stats Row ── */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6 animate-fade-up" style={{ animationDelay: "50ms" }}>
-        <StatBlock label="Signups" value={String(signupCount)} />
-        <StatBlock label="Checked In" value={String(checkedIn)} />
-        <StatBlock label="Auditioned" value={String(auditioned)} />
-        <StatBlock label="Callbacks" value={String(callbackCount)} />
-        <StatBlock label="Accepted" value={String(accepted)} />
-      </div>
+      {isPrecast ? (
+        // Precast shows never run audition stats — the company is the story.
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 animate-fade-up" style={{ animationDelay: "50ms" }}>
+          <StatBlock label="Cast Members" value={String(activeCast.length)} />
+          <StatBlock label="Joined" value={String(activeCast.filter((a) => a.actorId).length)} />
+          <StatBlock label="Invited" value={String(activeCast.filter((a) => !a.actorId && a.invitedAt).length)} />
+          <StatBlock label="Team" value={String(team.length)} />
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6 animate-fade-up" style={{ animationDelay: "50ms" }}>
+          <StatBlock label="Signups" value={String(signupCount)} />
+          <StatBlock label="Checked In" value={String(checkedIn)} />
+          <StatBlock label="Auditioned" value={String(auditioned)} />
+          <StatBlock label="Callbacks" value={String(callbackCount)} />
+          <StatBlock label="Accepted" value={String(accepted)} />
+        </div>
+      )}
 
       {/* ── Two-column layout ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -837,6 +901,18 @@ export default function ShowSetupPage() {
             </div>
           </Card>
 
+          {/* Your Cast — precast bulk add (spec Feature 2). Anchored for the
+              checklist's "Add your cast" CTA. */}
+          {isPrecast && (
+            <div id="precast-cast-section">
+              <PrecastCastSection
+                showId={showId}
+                roles={roles}
+                assignments={assignments}
+              />
+            </div>
+          )}
+
           {/* Poster Card */}
           <PosterCard
             orgId={show.orgId}
@@ -882,7 +958,9 @@ export default function ShowSetupPage() {
             )}
           </Card>
 
-          {/* Schedule Card */}
+          {/* Schedule Card — precast shows have no audition schedule to show
+              until a supplemental casting call creates blocks */}
+          {!(isPrecast && groups.length === 0) && (
           <Card variant="elevated" className="animate-fade-up" style={{ animationDelay: "200ms" }}>
             <CardHeader>
               <CardTitle>Audition Schedule ({groups.length} blocks)</CardTitle>
@@ -929,8 +1007,10 @@ export default function ShowSetupPage() {
               <p className="text-sm text-clay-500">No time slots defined yet.</p>
             )}
           </Card>
+          )}
 
-          {/* Callbacks Card */}
+          {/* Callbacks Card — not a precast concern (no audition pipeline) */}
+          {!(isPrecast && !hasCallbackInfo) && (
           <Card variant="elevated" className="animate-fade-up" style={{ animationDelay: "225ms" }}>
             <CardHeader>
               <CardTitle>Callbacks</CardTitle>
@@ -974,6 +1054,7 @@ export default function ShowSetupPage() {
               </p>
             )}
           </Card>
+          )}
 
           {/* Offer Agreements Card (item 25 — migration 022) */}
           <Card variant="elevated" className="animate-fade-up" style={{ animationDelay: "250ms" }}>
@@ -1037,8 +1118,9 @@ export default function ShowSetupPage() {
             <SectionHeader>Public Audition Page</SectionHeader>
             {show.status === "setup" ? (
               <p className="text-sm text-clay-500">
-                Your show is a private draft. Open auditions to publish a shareable public
-                page actors can sign up from.
+                {isPrecast
+                  ? "Already-cast shows don't need an audition page. If you ever open a casting call from the Casting board, a public page appears automatically."
+                  : "Your show is a private draft. Open auditions to publish a shareable public page actors can sign up from."}
               </p>
             ) : (
               <div className="flex flex-col gap-2">
@@ -1105,6 +1187,11 @@ export default function ShowSetupPage() {
           <Card variant="flat" className="animate-fade-up" style={{ animationDelay: "150ms" }}>
             <SectionHeader>Quick Actions</SectionHeader>
             <div className="flex flex-col gap-2">
+              {show.status === "setup" && isPrecast && (
+                <Button size="sm" className="w-full justify-center" onClick={() => setPublishOpen(true)} icon={<Play className="w-4 h-4" weight="bold" />}>
+                  Publish Cast &amp; Open the Hub
+                </Button>
+              )}
               {show.status === "setup" && nextAction && (
                 <Button size="sm" className="w-full justify-center" onClick={() => setConfirmOpen(true)} icon={<Play className="w-4 h-4" weight="bold" />}>
                   {nextAction.label}
@@ -1115,7 +1202,7 @@ export default function ShowSetupPage() {
                   View Audition Schedule
                 </Button>
               )}
-              {show.status !== "setup" && (
+              {show.status !== "setup" && !(isPrecast && groups.length === 0) && (
                 <Button variant="outline" size="sm" className="w-full justify-center" onClick={() => router.push(`/shows/${showId}/conflicts`)} icon={<CalendarX className="w-4 h-4 text-stage-500" weight="duotone" />}>
                   Conflict Calendar
                 </Button>
@@ -1190,6 +1277,42 @@ export default function ShowSetupPage() {
               loading={statusMutation.isPending}
             >
               {nextAction?.label}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Precast: Publish Cast & Open the Hub (reuses publishCastList) ── */}
+      <Modal open={publishOpen} onClose={() => setPublishOpen(false)} title="Publish Cast & Open the Hub">
+        <div className="flex flex-col items-center text-center py-4">
+          <Megaphone className="w-12 h-12 text-stage-500 mb-3" weight="duotone" />
+          <p className="text-sm text-curtain-800 mb-2">
+            Publish your cast list and open the Show Hub? Cast members who&apos;ve
+            joined Overture will see the show in My Shows.
+          </p>
+          {activeCast.length === 0 && (
+            <p className="text-xs text-ruby-500 mb-2">
+              Add at least one cast member first — there&apos;s nothing to publish yet.
+            </p>
+          )}
+          {activeCast.some((a) => a.addedDirectly && !a.invitedAt) && (
+            <p className="text-xs text-clay-500 mb-2 max-w-sm">
+              Heads up: {activeCast.filter((a) => a.addedDirectly && !a.invitedAt).length} cast{" "}
+              {activeCast.filter((a) => a.addedDirectly && !a.invitedAt).length === 1 ? "member hasn't" : "members haven't"}{" "}
+              been sent an invitation yet. You can send invitations before or after publishing.
+            </p>
+          )}
+          <div className="flex gap-3 mt-2">
+            <Button variant="ghost" onClick={() => setPublishOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => publishCastMutation.mutate()}
+              loading={publishCastMutation.isPending}
+              disabled={activeCast.length === 0}
+            >
+              Publish Cast
             </Button>
           </div>
         </div>

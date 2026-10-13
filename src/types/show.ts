@@ -156,6 +156,12 @@ export type Show = {
   state: string;
   distanceMiles: number | null;
   isPromoted: boolean;
+  /** Already-cast show (migration 024) — the create-screen answer "We've
+   *  already cast it — we just want the Show Hub". Reorders the setup
+   *  checklist (Add your cast → Build your team → Hub live) and makes the
+   *  subnav module-aware. Optional so mock rows and pre-paste cloud reads
+   *  stay valid; never changes the status machine. */
+  precast?: boolean;
   /** Role names an OPEN supplemental casting call is seeking (migration 023).
    *  Populated only by getOpenAuditions for shows surfaced via a call —
    *  drives the "Seeking: {roles}" badge on Browse/Discover. Optional so
@@ -281,11 +287,22 @@ export type CastAssignment = {
   showId: ID;
   roleId: ID;
   roleName: string;
-  actorId: ID;
+  /** NULL for a cast member added by email who has no account yet (precast
+   *  bulk add, migration 024) — mirrors show_team_members' guest pattern.
+   *  Signing up with the invited email auto-links (claim_cast_assignments). */
+  actorId: ID | null;
   actorName: string;
   assignmentType: AssignmentType;
   status: OfferStatus;
   sortOrder: number;
+  /** Entered directly by the director (precast bulk add) — status 'accepted'
+   *  without an offer dance. Honesty flag for history. Migration 024. */
+  addedDirectly?: boolean;
+  /** Guest fields (actorId null until claimed) — migration 024. */
+  guestName?: string | null;
+  guestEmail?: string | null;
+  /** Set when "Review & send invitations" fires; null = not invited yet. */
+  invitedAt?: string | null;
   /** Cloud rows carry timestamps (offer tracker); mock rows may not. */
   createdAt?: string | null;
   updatedAt?: string | null;

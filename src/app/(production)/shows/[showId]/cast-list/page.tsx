@@ -356,7 +356,7 @@ export default function CastListPage() {
                     </span>
                     <button
                       type="button"
-                      onClick={() => openActorPanel(assignment.actorId, showId)}
+                      onClick={() => assignment.actorId && openActorPanel(assignment.actorId, showId)}
                       className="flex items-center gap-2 hover:opacity-80 transition cursor-pointer print:cursor-auto print:hover:opacity-100"
                     >
                       <Avatar name={assignment.actorName} size="sm" />

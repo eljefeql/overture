@@ -9,7 +9,7 @@ import { createShow, getVenues } from "@/lib/api/client";
 import { Card, Button, Input } from "@/components/ui";
 import { useToast } from "@/components/ui/Toast";
 import { track } from "@/lib/analytics";
-import { ArrowRight, MaskHappy } from "@phosphor-icons/react";
+import { ArrowRight, MaskHappy, Megaphone, UsersThree, CheckCircle } from "@phosphor-icons/react";
 import type { ShowType } from "@/types";
 
 /* ============================================================
@@ -34,6 +34,9 @@ export default function NewShowPage() {
   const { toast } = useToast();
 
   const [title, setTitle] = useState("");
+  // "Where is this production right now?" — already-cast shows (spec Feature
+  // 2) skip auditions entirely: bulk-add the cast, then straight to the Hub.
+  const [precast, setPrecast] = useState(false);
   const [showType, setShowType] = useState<ShowType>("musical");
   const [authorInfo, setAuthorInfo] = useState("");
   const [season, setSeason] = useState("");
@@ -75,8 +78,9 @@ export default function NewShowPage() {
         showType,
         season: season.trim() || null,
         status: "setup",
-        auditionStart: auditionStart || null,
-        auditionEnd: auditionEnd || null,
+        precast,
+        auditionStart: precast ? null : auditionStart || null,
+        auditionEnd: precast ? null : auditionEnd || null,
         callbackDate: null,
         callbackStartTime: null,
         callbackEndTime: null,
@@ -100,7 +104,10 @@ export default function NewShowPage() {
     onSuccess: (newShow) => {
       track("show_created", { showId: newShow.id });
       queryClient.invalidateQueries({ queryKey: ["shows"] });
-      toast("success", "Show created! Let's build it out.");
+      toast(
+        "success",
+        precast ? "Show created! Next: add your cast." : "Show created! Let's build it out."
+      );
       router.push(`/shows/${newShow.id}/setup`);
     },
     onError: (err: Error) => toast("error", err.message),
@@ -115,7 +122,7 @@ export default function NewShowPage() {
       toast("error", "Your theatre is still loading — try again in a moment.");
       return;
     }
-    if (auditionStart && auditionEnd && auditionEnd < auditionStart) {
+    if (!precast && auditionStart && auditionEnd && auditionEnd < auditionStart) {
       toast("error", "Audition end date must be after the start date.");
       return;
     }
@@ -178,6 +185,60 @@ export default function NewShowPage() {
               onChange={(e) => setAuthorInfo(e.target.value)}
             />
 
+            {/* Where is this production right now? (spec Feature 2) */}
+            <div>
+              <p className="text-xs font-semibold text-curtain-700 tracking-wide mb-2">
+                Where is this production right now?
+              </p>
+              <div className="flex flex-col gap-2" role="radiogroup" aria-label="Where is this production right now?">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={!precast}
+                  onClick={() => setPrecast(false)}
+                  className={`flex items-start gap-3 text-left rounded-xl border px-3 py-2.5 transition ${
+                    !precast
+                      ? "border-stage-400 bg-stage-50"
+                      : "border-cream-200 bg-white hover:border-cream-300"
+                  }`}
+                >
+                  <Megaphone className={`w-5 h-5 flex-shrink-0 mt-0.5 ${!precast ? "text-stage-500" : "text-clay-300"}`} weight="duotone" />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-curtain-900">
+                      We&apos;ll audition through Overture
+                    </span>
+                    <span className="block text-xs text-clay-500">
+                      Post auditions, schedule signups, run callbacks and casting here.
+                    </span>
+                  </span>
+                  {!precast && <CheckCircle className="w-4 h-4 text-stage-500 flex-shrink-0 mt-1 ml-auto" weight="fill" />}
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={precast}
+                  onClick={() => setPrecast(true)}
+                  className={`flex items-start gap-3 text-left rounded-xl border px-3 py-2.5 transition ${
+                    precast
+                      ? "border-stage-400 bg-stage-50"
+                      : "border-cream-200 bg-white hover:border-cream-300"
+                  }`}
+                >
+                  <UsersThree className={`w-5 h-5 flex-shrink-0 mt-0.5 ${precast ? "text-stage-500" : "text-clay-300"}`} weight="duotone" />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-curtain-900">
+                      We&apos;ve already cast it — we just want the Show Hub
+                    </span>
+                    <span className="block text-xs text-clay-500">
+                      Add your cast by name and email, invite everyone in, and run the
+                      show from the Hub. You can still open a casting call later.
+                    </span>
+                  </span>
+                  {precast && <CheckCircle className="w-4 h-4 text-stage-500 flex-shrink-0 mt-1 ml-auto" weight="fill" />}
+                </button>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <Input
                 label="City"
@@ -198,6 +259,7 @@ export default function NewShowPage() {
               </p>
             )}
 
+            {!precast && (
             <div>
               <p className="text-xs font-semibold text-curtain-700 tracking-wide mb-1">
                 Rough Audition Dates <span className="font-normal text-clay-400">(optional)</span>
@@ -217,6 +279,7 @@ export default function NewShowPage() {
                 />
               </div>
             </div>
+            )}
           </div>
         </Card>
 

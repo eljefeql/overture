@@ -461,7 +461,10 @@ function audienceIds(
   a: Announcement,
   data: HubData
 ): Set<ID> {
-  const castIds = data.cast.map((c) => c.actorId);
+  // Guests (no account yet, migration 024) have null actorIds — not reachable.
+  const castIds = data.cast
+    .map((c) => c.actorId)
+    .filter((id): id is ID => !!id);
   const teamIds = data.team.map((t) => t.userId);
   switch (a.audience) {
     case "cast":
@@ -476,6 +479,7 @@ function audienceIds(
             ["lead", "supporting"].includes(roleTypeById.get(c.roleId) ?? "")
           )
           .map((c) => c.actorId)
+          .filter((id): id is ID => !!id)
       );
     }
     case "rehearsal": {
@@ -928,6 +932,8 @@ function ScheduleSection({
     const seen = new Set<string>();
     const list: { id: ID; name: string; detail: string }[] = [];
     for (const c of data.cast) {
+      // Guests (no account yet) can't be picked for a call — skip them.
+      if (!c.actorId) continue;
       if (seen.has(c.actorId)) {
         const existing = list.find((p) => p.id === c.actorId);
         if (existing) existing.detail += `, ${c.roleName}`;
@@ -1295,20 +1301,35 @@ function PeopleSection({
     setNormsOpen(true);
   };
 
-  // Group multiple accepted roles per person.
+  // Group multiple accepted roles per person. Cast members added by email
+  // (precast bulk add) have no account yet — actorId is null until they sign
+  // up and claim_cast_assignments links them. They render as "Invited" (no
+  // profile link) so the SM can see who still needs a nudge.
   const castPeople = useMemo(() => {
-    const byActor = new Map<string, { name: string; roles: string[] }>();
+    const byActor = new Map<
+      string,
+      { name: string; roles: string[]; joined: boolean; invited: boolean; email: string | null }
+    >();
     for (const c of data.cast) {
-      const entry = byActor.get(c.actorId) ?? { name: c.actorName, roles: [] };
+      const key = c.actorId ?? `guest-${c.id}`;
+      const entry =
+        byActor.get(key) ?? {
+          name: c.actorName,
+          roles: [],
+          joined: !!c.actorId,
+          invited: !!c.invitedAt,
+          email: c.guestEmail ?? null,
+        };
       entry.roles.push(
         c.assignmentType === "primary"
           ? c.roleName
           : `${c.roleName} (${c.assignmentType})`
       );
-      byActor.set(c.actorId, entry);
+      byActor.set(key, entry);
     }
     return [...byActor.entries()].map(([id, v]) => ({ id, ...v }));
   }, [data.cast]);
+  const unjoinedCount = castPeople.filter((p) => !p.joined).length;
 
   return (
     <section>
@@ -1366,20 +1387,47 @@ function PeopleSection({
           </CardHeader>
           {castPeople.length > 0 ? (
             <div className="flex flex-col gap-3">
-              {castPeople.map((p) => (
-                <Link
-                  key={p.id}
-                  href={`/actors/${p.id}`}
-                  className="flex items-center gap-3 -mx-1.5 px-1.5 py-0.5 rounded-xl hover:bg-cream-50 transition"
-                  title={`View ${p.name}'s profile`}
-                >
-                  <Avatar name={p.name} size="sm" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-curtain-900 truncate">{p.name}</p>
-                    <p className="text-xs text-clay-500 truncate">{p.roles.join(" · ")}</p>
+              {castPeople.map((p) =>
+                p.joined ? (
+                  <Link
+                    key={p.id}
+                    href={`/actors/${p.id}`}
+                    className="flex items-center gap-3 -mx-1.5 px-1.5 py-0.5 rounded-xl hover:bg-cream-50 transition"
+                    title={`View ${p.name}'s profile`}
+                  >
+                    <Avatar name={p.name} size="sm" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-curtain-900 truncate">{p.name}</p>
+                      <p className="text-xs text-clay-500 truncate">{p.roles.join(" · ")}</p>
+                    </div>
+                  </Link>
+                ) : (
+                  // Added by email, hasn't created an account yet — no
+                  // profile to link to.
+                  <div key={p.id} className="flex items-center gap-3 -mx-1.5 px-1.5 py-0.5">
+                    <Avatar name={p.name} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-curtain-900 truncate">{p.name}</p>
+                      <p className="text-xs text-clay-500 truncate">
+                        {p.roles.join(" · ")}
+                        {isTeam && p.email ? ` · ${p.email}` : ""}
+                      </p>
+                    </div>
+                    <Badge variant={p.invited ? "gold" : "muted"} size="sm">
+                      {p.invited ? "Invited" : "Not invited yet"}
+                    </Badge>
                   </div>
-                </Link>
-              ))}
+                )
+              )}
+              {unjoinedCount > 0 && (
+                <p className="text-[11px] text-clay-400 leading-snug">
+                  {unjoinedCount === 1
+                    ? "1 cast member hasn't joined Overture yet — they"
+                    : `${unjoinedCount} cast members haven't joined Overture yet — they`}{" "}
+                  can&apos;t receive announcements or reminders until they create
+                  their account with the invited email.
+                </p>
+              )}
             </div>
           ) : (
             <p className="text-sm text-clay-500">

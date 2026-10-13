@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { Badge } from "./Badge";
 import { cn } from "@/lib/utils";
 import { SHOW_STATUS_LABELS, SHOW_STATUS_BADGE } from "@/lib/constants";
+import { getAuditionGroups, getCallbacks, getCastAssignments } from "@/lib/api/client";
 import type { ShowStatus } from "@/types";
 
 /* ============================================================
@@ -12,11 +14,21 @@ import type { ShowStatus } from "@/types";
 
    Setup · Auditions · Callbacks · Casting · Cast List
    + Show status badge on the right
+
+   Precast shows (spec Feature 2) are module-aware: tabs for
+   audition machinery the show never used are hidden — EXCEPT
+   the Casting board, which stays reachable by owner decision
+   (its supplemental-call card is how a precast show later
+   recruits). A hidden module reappears the moment it's used
+   (e.g. a casting call creates audition blocks). Non-precast
+   shows render byte-identically to before.
    ============================================================ */
 
 type Props = {
   showId: string;
   showStatus?: ShowStatus;
+  /** shows.precast (migration 024) — enables module-aware tabs. */
+  precast?: boolean;
 };
 
 // Status phase ordering — tabs up to and including the current phase are accessible
@@ -41,11 +53,33 @@ const TAB_PHASE: Record<string, number> = {
   hub: 4, // the hub comes alive once the cast is published
 };
 
-export function ProductionSubNav({ showId, showStatus = "setup" }: Props) {
+export function ProductionSubNav({ showId, showStatus = "setup", precast = false }: Props) {
   const pathname = usePathname();
   const currentPhase = STATUS_PHASE_ORDER[showStatus];
 
-  const tabs = [
+  // Precast only: which audition modules has this show actually used?
+  // (Disabled — and therefore zero extra fetches — for every other show.)
+  const { data: modules } = useQuery({
+    queryKey: ["precastModules", showId],
+    queryFn: async () => {
+      const [groups, cbs, assignments] = await Promise.all([
+        getAuditionGroups(showId),
+        getCallbacks(showId),
+        getCastAssignments(showId),
+      ]);
+      return {
+        hasAuditions: groups.length > 0,
+        hasCallbacks: cbs.length > 0,
+        // Offers = an actual offer dance happened (direct adds don't count).
+        hasOffers: assignments.some(
+          (a) => !a.addedDirectly && a.status !== "withdrawn"
+        ),
+      };
+    },
+    enabled: precast,
+  });
+
+  const allTabs = [
     { href: `/shows/${showId}/setup`, label: "Setup", segment: "setup" },
     { href: `/shows/${showId}/auditions`, label: "Auditions", segment: "auditions" },
     { href: `/shows/${showId}/conflicts`, label: "Conflicts", segment: "conflicts" },
@@ -55,6 +89,26 @@ export function ProductionSubNav({ showId, showStatus = "setup" }: Props) {
     { href: `/shows/${showId}/cast-list`, label: "Cast List", segment: "cast-list" },
     { href: `/shows/${showId}/hub`, label: "Hub", segment: "hub" },
   ];
+
+  // Module-aware filter — precast shows only. Setup / Casting / Cast List /
+  // Hub always stay; a hidden tab also stays if it's the CURRENT page
+  // (never strand the user on a tabless route).
+  const tabs = precast
+    ? allTabs.filter((tab) => {
+        if (pathname?.includes(`/${tab.segment}`)) return true;
+        switch (tab.segment) {
+          case "auditions":
+          case "conflicts":
+            return modules?.hasAuditions ?? false;
+          case "callbacks":
+            return modules?.hasCallbacks ?? false;
+          case "offers":
+            return modules?.hasOffers ?? false;
+          default:
+            return true; // setup · casting · cast-list · hub
+        }
+      })
+    : allTabs;
 
   const isActive = (segment: string) => {
     return pathname?.includes(`/${segment}`);

@@ -108,7 +108,11 @@ export function resolveCalledUserIds(
   roles: ShowRole[]
 ): Set<ID> {
   const roleTypeById = new Map(roles.map((r) => [r.id, r.roleType]));
-  const castIds = acceptedCast.map((c) => c.actorId);
+  // Guests (invited by email, no account yet — migration 024) have no user
+  // id, so they can't be called/notified; drop their null actorIds.
+  const castIds = acceptedCast
+    .map((c) => c.actorId)
+    .filter((id): id is ID => !!id);
   const teamIds = team.map((t) => t.userId);
   if (rehearsal.calledScope === "custom") {
     return new Set(rehearsal.calledPeople);
@@ -125,6 +129,7 @@ export function resolveCalledUserIds(
           return wantPrincipals ? isPrincipal : !isPrincipal;
         })
         .map((c) => c.actorId)
+        .filter((id): id is ID => !!id)
     );
   }
   // everyone = full company (cast + team)

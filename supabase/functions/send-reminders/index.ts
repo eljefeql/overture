@@ -524,7 +524,8 @@ type GuestEmail = {
   body: string;
   show_title: string | null;
   cancel_token: string | null;
-  /** Template hint (migration 020): 'org_invite' | null (= volunteer style). */
+  /** Template hint (migrations 020/024): 'org_invite' | 'cast_invite' |
+   *  null (= volunteer style). */
   kind?: string | null;
   /** Relative CTA path (migration 020) — rendered as an absolute APP_URL link. */
   link_url?: string | null;
@@ -536,6 +537,8 @@ type GuestEmail = {
  * mangle accented characters). Two template branches:
  *   - 'org_invite' (migration 020): warm theatre-invite with a signup CTA
  *     button; no cancel link, no volunteer upsell.
+ *   - 'cast_invite' (migration 024): warm you're-in-the-cast invite with a
+ *     signup CTA — same shape as org_invite, cast-specific copy.
  *   - default: the volunteer confirmation/reminder (cancel link + account
  *     upsell), unchanged in substance. Rows written before migration 020
  *     simply have no kind/link_url and land here.
@@ -544,6 +547,8 @@ function guestEmailHtml(e: GuestEmail): string {
   const inner =
     e.kind === "org_invite"
       ? guestInviteInner(e)
+      : e.kind === "cast_invite"
+      ? guestCastInviteInner(e)
       : guestVolunteerInner(e);
   return `<!DOCTYPE html>
   <html lang="en">
@@ -568,6 +573,18 @@ function guestInviteInner(e: GuestEmail): string {
     <p style="color: #8a7968; font-size: 12px; margin-top: 28px;">
       You're receiving this because someone invited this email address to
       their theatre on Overture. If that's not you, you can safely ignore it.
+    </p>`;
+}
+
+function guestCastInviteInner(e: GuestEmail): string {
+  const ctaUrl = new URL(e.link_url ?? "/signup", APP_URL).toString();
+  return `
+    <a href="${ctaUrl}" style="display: inline-block; margin-top: 16px; background: #c9a227; color: #2b2030; text-decoration: none; padding: 10px 20px; border-radius: 10px; font-family: Helvetica, Arial, sans-serif; font-weight: 600; font-size: 14px;">
+      See your schedule on Overture
+    </a>
+    <p style="color: #8a7968; font-size: 12px; margin-top: 28px;">
+      You're receiving this because a theatre added this email address to a
+      show's cast on Overture. If that's not you, you can safely ignore it.
     </p>`;
 }
 

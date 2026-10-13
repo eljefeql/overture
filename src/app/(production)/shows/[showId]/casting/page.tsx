@@ -849,7 +849,7 @@ export default function CastingBoardPage() {
                       >
                         <div
                           className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition"
-                          onClick={() => openActorPanel(assignment.actorId, showId)}
+                          onClick={() => assignment.actorId && openActorPanel(assignment.actorId, showId)}
                         >
                           <Avatar name={assignment.actorName} size="sm" />
                           <span className="text-sm font-semibold text-curtain-900 hover:text-curtain-700">
@@ -897,7 +897,7 @@ export default function CastingBoardPage() {
                           {assignment ? (
                             <div
                               className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition"
-                              onClick={() => openActorPanel(assignment.actorId, showId)}
+                              onClick={() => assignment.actorId && openActorPanel(assignment.actorId, showId)}
                             >
                               <Avatar name={assignment.actorName} size="sm" />
                               <span className="text-sm font-semibold text-curtain-900 hover:text-curtain-700">

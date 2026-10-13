@@ -146,6 +146,7 @@ export default function ProductionLayout({
             <ProductionSubNav
               showId={showId}
               showStatus={show?.status}
+              precast={show?.precast}
             />
           )}
         </>

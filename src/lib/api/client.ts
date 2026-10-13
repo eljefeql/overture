@@ -89,6 +89,8 @@ function rowToShow(r: any): Show {
     city: r.city, state: r.state,
     distanceMiles: null, // computed client-side once geo lands
     isPromoted: r.is_promoted,
+    // Pre-migration-024 rows have no column → a normal audition show.
+    precast: r.precast ?? false,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
@@ -196,11 +198,17 @@ function rowToCastAssignment(r: any): CastAssignment {
     showId: r.show_id,
     roleId: r.role_id,
     roleName: r.show_roles?.name ?? "",
-    actorId: r.actor_id,
-    actorName: r.profiles?.display_name ?? "",
+    // null = invited-by-email guest, no account yet (migration 024).
+    actorId: r.actor_id ?? null,
+    actorName: r.profiles?.display_name ?? r.guest_name ?? "",
     assignmentType: r.assignment_type,
     status: r.status,
     sortOrder: r.sort_order,
+    // Pre-migration-024 rows (and pre-paste cloud reads) have no columns.
+    addedDirectly: r.added_directly ?? false,
+    guestName: r.guest_name ?? null,
+    guestEmail: r.guest_email ?? null,
+    invitedAt: r.invited_at ?? null,
     createdAt: r.created_at ?? null,
     updatedAt: r.updated_at ?? null,
   };
@@ -544,6 +552,16 @@ export async function claimPendingInvites(): Promise<number> {
     if (error) console.warn("Volunteer signup auto-link skipped:", error.message);
   } catch (e) {
     console.warn("Volunteer signup auto-link skipped:", e);
+  }
+
+  // Same moment again: link any cast assignments a director entered with
+  // this email before the account existed (claim_cast_assignments, migration
+  // 024). Best-effort — a missing RPC pre-paste just skips quietly.
+  try {
+    const { error } = await getSupabase().rpc("claim_cast_assignments");
+    if (error) console.warn("Cast assignment auto-link skipped:", error.message);
+  } catch (e) {
+    console.warn("Cast assignment auto-link skipped:", e);
   }
 
   try {
@@ -2929,6 +2947,9 @@ function showUpdatesToRow(updates: Partial<Show>): Record<string, any> {
   if (updates.posterUrl !== undefined) row.poster_url = updates.posterUrl;
   if (updates.city !== undefined) row.city = updates.city;
   if (updates.state !== undefined) row.state = updates.state;
+  // precast (migration 024): only ever sent when TRUE, so standard audition
+  // shows never touch the column — their writes stay byte-identical pre-paste.
+  if (updates.precast === true) row.precast = true;
   return row;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -2941,7 +2962,19 @@ export async function createShow(data: Omit<Show, "id" | "createdAt" | "updatedA
       .insert({ org_id: data.orgId, is_promoted: false, ...showUpdatesToRow(data) })
       .select(SHOW_SELECT)
       .single();
-    if (error) throw new Error(error.message);
+    if (error) {
+      // Pre-migration-024: the precast column doesn't exist yet. Deliberately
+      // LOUD (same choice as supplemental calls / migration 023): silently
+      // creating a standard audition show would strand the user in a flow
+      // they explicitly didn't ask for — and the bulk-add step would fail
+      // anyway. Standard shows never send the column, so they're unaffected.
+      if (data.precast && /precast/.test(error.message)) {
+        throw new Error(
+          "Already-cast shows need a database update (migration 024) your Overture admin hasn't applied yet. You can still create this as a standard audition show for now."
+        );
+      }
+      throw new Error(error.message);
+    }
 
     // Put the creator on the show team right away — show-team RLS (roles,
     // slots, notes) keys off this row, and the wizard already promises
@@ -3632,6 +3665,163 @@ export async function createCastAssignment(
   return newAssignment;
 }
 
+/* ============================================================
+   Already-cast shows (spec Feature 2, migration 024) — bulk add
+   an existing cast directly. Assignments are director-confirmed
+   (status 'accepted', flagged added_directly — no offer dance).
+   Emails NEVER fire on row save: the batch "Review & send
+   invitations" confirm calls sendCastInvites.
+   ============================================================ */
+
+const PRECAST_MIGRATION_MSG =
+  "Adding an existing cast needs a database update (migration 024) your Overture admin hasn't applied yet.";
+
+/**
+ * Add one cast member directly (precast bulk add). If the email belongs to
+ * an Overture account it's linked immediately; otherwise the row is stored
+ * as a guest (name + email) and auto-links when they sign up
+ * (claim_cast_assignments — same pattern as team members / volunteers).
+ */
+export async function addDirectCastMember(data: {
+  showId: string;
+  roleId: string;
+  roleName: string;
+  name: string;
+  email: string;
+}): Promise<CastAssignment> {
+  const email = data.email.trim().toLowerCase();
+  if (isSupabaseConfigured) {
+    const supabase = getSupabase();
+
+    // Link an existing account by email (same lookup addTeamMember uses).
+    let linkedUserId: string | null = null;
+    const { data: profileRow } = await supabase
+      .from("profiles")
+      .select("id, display_name")
+      .ilike("email", email)
+      .maybeSingle();
+    if (profileRow) linkedUserId = profileRow.id;
+
+    // Same-person-twice-in-the-same-role guard (mirrors createCastAssignment's
+    // ensemble-pot guard; precast roles can hold several people, e.g. a
+    // double-cast role, so there's no one-per-slot check here).
+    const dupeQuery = supabase
+      .from("cast_assignments")
+      .select("id")
+      .eq("show_id", data.showId)
+      .eq("role_id", data.roleId)
+      .neq("status", "withdrawn");
+    const { data: dupe } = linkedUserId
+      ? await dupeQuery.eq("actor_id", linkedUserId).maybeSingle()
+      : await dupeQuery.ilike("guest_email", email).maybeSingle();
+    if (dupe) throw new Error(`${data.name || "This person"} is already in this role.`);
+
+    const { data: row, error } = await supabase
+      .from("cast_assignments")
+      .insert({
+        show_id: data.showId,
+        role_id: data.roleId,
+        actor_id: linkedUserId,
+        guest_name: linkedUserId ? null : data.name.trim(),
+        guest_email: linkedUserId ? null : email,
+        assignment_type: "primary",
+        status: "accepted",
+        added_directly: true,
+        sort_order: 0,
+      })
+      .select(CAST_SELECT)
+      .single();
+    if (error) {
+      // Pre-migration-024 the columns don't exist (and actor_id is NOT NULL,
+      // so a guest insert fails too). Deliberately LOUD — a silent retry
+      // would store a fake offer-accepted row with no guest identity, which
+      // corrupts the cast history (same reasoning as migration 023's create).
+      if (/added_directly|guest_name|guest_email|invited_at|actor_id/.test(error.message)) {
+        throw new Error(PRECAST_MIGRATION_MSG);
+      }
+      throw new Error(error.message);
+    }
+    return rowToCastAssignment(row);
+  }
+
+  await delay(200);
+  // Mock: link by email against the mock actor roster, else store a guest.
+  const matched = actors.find(
+    (a) => (a.email ?? "").toLowerCase() === email
+  );
+  const dupe = castAssignments.find(
+    (a) =>
+      a.showId === data.showId &&
+      a.roleId === data.roleId &&
+      a.status !== "withdrawn" &&
+      (matched
+        ? a.actorId === matched.id
+        : (a.guestEmail ?? "").toLowerCase() === email)
+  );
+  if (dupe) throw new Error(`${data.name || "This person"} is already in this role.`);
+  const newAssignment: CastAssignment = {
+    id: `cast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    showId: data.showId,
+    roleId: data.roleId,
+    roleName: data.roleName,
+    actorId: matched?.id ?? null,
+    actorName: matched?.displayName ?? data.name.trim(),
+    assignmentType: "primary",
+    status: "accepted",
+    sortOrder: 0,
+    addedDirectly: true,
+    guestName: matched ? null : data.name.trim(),
+    guestEmail: matched ? null : email,
+    invitedAt: null,
+  };
+  castAssignments.push(newAssignment);
+  return newAssignment;
+}
+
+/**
+ * Batch "Review & send invitations" confirm (owner decision: NEVER auto-send
+ * on row save). Cloud: the send_cast_invites RPC notifies linked accounts
+ * in-app (email rides the webhook) and queues warm guest_emails invites
+ * (kind 'cast_invite') for everyone else. Returns how many went out.
+ */
+export async function sendCastInvites(showId: string): Promise<number> {
+  if (isSupabaseConfigured) {
+    const { data, error } = await getSupabase().rpc("send_cast_invites", {
+      p_show_id: showId,
+    });
+    if (error) {
+      // RPC missing pre-paste — loud, so the director never believes
+      // invitations went out when nothing was sent.
+      if (/send_cast_invites|schema cache|function/i.test(error.message)) {
+        throw new Error(
+          "Sending cast invitations needs a database update (migration 024) your Overture admin hasn't applied yet."
+        );
+      }
+      throw new Error(error.message);
+    }
+    return data ?? 0;
+  }
+  await delay(300);
+  let count = 0;
+  const now = new Date().toISOString();
+  // Replace rows with NEW objects (not in-place mutation): TanStack's
+  // structural sharing deep-compares refetched data against the cache, and
+  // mutated-in-place objects read as "unchanged", leaving memos stale.
+  for (let i = 0; i < castAssignments.length; i++) {
+    const a = castAssignments[i];
+    if (
+      a.showId === showId &&
+      a.addedDirectly &&
+      !a.invitedAt &&
+      a.status === "accepted"
+    ) {
+      castAssignments[i] = { ...a, invitedAt: now };
+      count++;
+    }
+  }
+  return count;
+}
+
 export async function updateCastAssignment(
   assignmentId: string,
   updates: Partial<CastAssignment>
@@ -3654,10 +3844,13 @@ export async function updateCastAssignment(
     return rowToCastAssignment(data);
   }
   await delay(200);
-  const assignment = castAssignments.find((a) => a.id === assignmentId);
-  if (!assignment) throw new Error("Cast assignment not found.");
-  Object.assign(assignment, updates);
-  return assignment;
+  const idx = castAssignments.findIndex((a) => a.id === assignmentId);
+  if (idx === -1) throw new Error("Cast assignment not found.");
+  // Replace with a NEW object (not in-place mutation) so TanStack's
+  // structural sharing sees the change — see sendCastInvites' mock note.
+  const updated = { ...castAssignments[idx], ...updates };
+  castAssignments[idx] = updated;
+  return updated;
 }
 
 // ============================================================
@@ -3830,6 +4023,10 @@ export async function sendOfferReminder(assignmentId: string): Promise<void> {
     const assignment = rowToCastAssignment(data);
     if (assignment.status !== "sent") {
       throw new Error("This offer has already been responded to.");
+    }
+    if (!assignment.actorId) {
+      // Direct-add guests are never 'sent', but keep the guard honest.
+      throw new Error("This cast member hasn't joined Overture yet.");
     }
     const showTitle = await getShowTitle(assignment.showId);
     await pushNotification({
