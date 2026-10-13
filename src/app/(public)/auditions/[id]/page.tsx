@@ -56,7 +56,8 @@ import {
   Trophy,
 } from "@phosphor-icons/react";
 import Link from "next/link";
-import type { ShowRole, Callback, CastAssignment } from "@/types";
+import type { ShowRole, Callback, CastAssignment, ShowStatus } from "@/types";
+import { isOpenSupplementalGroup } from "@/types";
 import {
   AuditionSignupModal,
   type SignupFormData,
@@ -67,6 +68,16 @@ import {
    ============================================================ */
 
 type ActorPhase = "browsing" | "signed-up" | "callback-pending" | "callback-confirmed" | "cast-offered" | "cast-accepted";
+
+/** Statuses past open auditions — the territory of supplemental casting
+ *  calls (SUPPLEMENTAL_AND_PRECAST_SPEC.md, Feature 1). */
+const PAST_AUDITION_STATUSES: ShowStatus[] = [
+  "auditions_closed",
+  "callbacks",
+  "casting",
+  "cast",
+  "archived",
+];
 
 function determinePhase(
   isSignedUp: boolean,
@@ -267,14 +278,38 @@ export default function AuditionDetailPage() {
 
   const stageManager = team?.find((t) => t.role === "stage_manager");
 
+  // ── Supplemental casting call (spec Feature 1) ──
+  // A show past auditions with OPEN supplemental blocks reframes this page:
+  // "Now casting: {roles}" — only the sought roles are listed, signup is
+  // restricted to the call's blocks, and roles-interested is constrained to
+  // the target roles. Cast list and dates are untouched.
+  const openCallGroups = (groups ?? []).filter(isOpenSupplementalGroup);
+  const supplementalActive =
+    PAST_AUDITION_STATUSES.includes(show.status) && openCallGroups.length > 0;
+  const callTargetRoleIds = new Set(
+    openCallGroups.flatMap((g) => g.targetRoleIds ?? [])
+  );
+  const callRoles = (roles ?? []).filter((r) => callTargetRoleIds.has(r.id));
+  const callNote =
+    openCallGroups.find((g) => g.supplementalNote)?.supplementalNote ?? null;
+  // What browsing viewers see / sign up through. Outside a call, unchanged.
+  const visibleRoles = supplementalActive && callRoles.length > 0 ? callRoles : roles;
+  const visibleGroups = supplementalActive ? openCallGroups : groups;
+
   // Find the group the actor signed up for
   const signedUpGroup =
     isSignedUp && existingSignup.groupId
       ? groups?.find((g) => g.id === existingSignup.groupId)
       : null;
 
-  // Public social proof — total signups across all slots (count only, never names)
-  const signupCount = slotAvailability?.reduce((sum, g) => sum + g.taken, 0) ?? 0;
+  // Public social proof — total signups across all slots (count only, never
+  // names). During a supplemental call, count only the call's blocks so the
+  // teaser doesn't claim the original audition's turnout.
+  const openCallGroupIds = new Set(openCallGroups.map((g) => g.id));
+  const signupCount =
+    slotAvailability
+      ?.filter((g) => !supplementalActive || openCallGroupIds.has(g.groupId))
+      .reduce((sum, g) => sum + g.taken, 0) ?? 0;
 
   async function handleShare() {
     // Canonical absolute public URL — never the raw href (which can carry
@@ -352,7 +387,11 @@ export default function AuditionDetailPage() {
       case "signed-up":
         return <Badge variant="success" size="md">Signed Up</Badge>;
       default:
-        return <Badge variant="success" size="md">Auditions Open</Badge>;
+        return supplementalActive ? (
+          <Badge variant="gold" size="md">Now Casting</Badge>
+        ) : (
+          <Badge variant="success" size="md">Auditions Open</Badge>
+        );
     }
   })();
 
@@ -908,16 +947,46 @@ export default function AuditionDetailPage() {
          ============================================================ */}
       {phase === "browsing" && (
         <>
+          {/* Supplemental casting call reframe (spec Feature 1): the show is
+              past auditions, but the team is recruiting for specific roles. */}
+          {supplementalActive && (
+            <Card variant="highlighted" className="mb-6">
+              <div className="flex items-start gap-3">
+                <Megaphone
+                  className="w-8 h-8 text-stage-500 flex-shrink-0 mt-0.5"
+                  weight="duotone"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-lg font-display text-curtain-900">
+                    Now casting:{" "}
+                    {callRoles.length > 0
+                      ? callRoles.map((r) => r.name).join(", ")
+                      : "select roles"}
+                  </p>
+                  <p className="text-xs text-clay-500 mt-0.5">
+                    General auditions for this show have closed — the team is
+                    holding a casting call for the role{callRoles.length !== 1 ? "s" : ""} below.
+                  </p>
+                  {callNote && (
+                    <p className="text-sm text-curtain-800 leading-relaxed mt-3">
+                      {callNote}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </Card>
+          )}
+
           <EventInfoBlocks show={show} />
 
           <AuditionScheduleByDay
-            groups={groups}
+            groups={visibleGroups}
             slotAvailability={slotAvailability}
             signupNames={user ? signupNames : undefined}
             isSignedIn={!!user}
           />
 
-          {show.auditionNotes && (
+          {show.auditionNotes && !supplementalActive && (
             <Card variant="sunken" className="mb-8">
               <SectionHeader>Audition Instructions</SectionHeader>
               <p className="text-sm text-curtain-800 leading-relaxed">
@@ -926,7 +995,7 @@ export default function AuditionDetailPage() {
             </Card>
           )}
 
-          <RolesList roles={roles} />
+          <RolesList roles={visibleRoles} />
 
           {/* People-layer gating: team contact info requires an account */}
           {user ? (
@@ -946,13 +1015,15 @@ export default function AuditionDetailPage() {
         </>
       )}
 
-      {/* Sign Up modal */}
-      {roles && groups && slotAvailability && (
+      {/* Sign Up modal — during a supplemental call, the slot list is the
+          call's blocks only and roles-interested is constrained to the
+          call's target roles (spec Feature 1). */}
+      {visibleRoles && visibleGroups && slotAvailability && (
         <AuditionSignupModal
           open={showModal}
           onClose={() => setShowModal(false)}
-          roles={roles}
-          groups={groups}
+          roles={visibleRoles}
+          groups={visibleGroups}
           slotAvailability={slotAvailability}
           showTitle={show.title}
           orgName={show.orgName}

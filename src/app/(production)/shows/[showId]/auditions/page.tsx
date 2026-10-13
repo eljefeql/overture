@@ -49,6 +49,7 @@ import { formatTime, formatHeight, formatDate, formatConflictText } from "@/lib/
 import { publicShareUrl, copyText } from "@/lib/share";
 import {
   MagnifyingGlass,
+  Megaphone,
   ArrowSquareOut,
   LinkSimple,
   CalendarX,
@@ -100,6 +101,9 @@ export default function AuditionsPage() {
   const [callbackRoleIds, setCallbackRoleIds] = useState<Set<string>>(new Set());
   const [advanceConfirmOpen, setAdvanceConfirmOpen] = useState(false);
   const [roleTrackerOpen, setRoleTrackerOpen] = useState(true);
+  // Supplemental casting call (spec Feature 1): limit the board to the
+  // call's blocks. Only offered when such blocks exist.
+  const [callBlocksOnly, setCallBlocksOnly] = useState(false);
 
   // ── Data fetching ──
   const { data, isLoading, isError } = useQuery({
@@ -594,6 +598,16 @@ export default function AuditionsPage() {
               {f.label}
             </Pill>
           ))}
+          {/* Supplemental casting-call blocks exist → offer a block filter */}
+          {groups?.some((g) => g.supplemental) && (
+            <Pill
+              variant="filter"
+              active={callBlocksOnly}
+              onClick={() => setCallBlocksOnly((v) => !v)}
+            >
+              Casting call
+            </Pill>
+          )}
         </div>
 
         {/* Batch toggle (evaluators only) */}
@@ -628,7 +642,7 @@ export default function AuditionsPage() {
       {/* ── Groups ── */}
       <div className="flex flex-col gap-6 animate-fade-up" style={{ animationDelay: "150ms" }}>
         {groups && groups.length > 0 ? (
-          groups.map((group) => {
+          (callBlocksOnly ? groups.filter((g) => g.supplemental) : groups).map((group) => {
             const groupSignups = filteredSignups.filter((s) => s.groupId === group.id);
             const totalInGroup = signups.filter((s) => s.groupId === group.id).length;
 
@@ -647,6 +661,15 @@ export default function AuditionsPage() {
                     <span className="text-xs text-stage-600 font-medium">
                       {formatTime(group.startTime)} &ndash; {formatTime(group.endTime)}
                     </span>
+                    {/* Supplemental casting-call block (spec Feature 1) */}
+                    {group.supplemental && (
+                      <Badge variant={group.supplementalClosedAt ? "muted" : "gold"} size="sm">
+                        <span className="inline-flex items-center gap-1">
+                          <Megaphone className="w-3.5 h-3.5" weight="duotone" />
+                          Casting call{group.supplementalClosedAt ? " · closed" : ""}
+                        </span>
+                      </Badge>
+                    )}
                   </div>
                   <span className={`text-xs font-medium ${totalInGroup >= group.slotCount ? "text-ruby-500" : totalInGroup >= group.slotCount * 0.8 ? "text-stage-600" : "text-clay-400"}`}>
                     {totalInGroup} / {group.slotCount} slots{totalInGroup >= group.slotCount ? " · Full" : ""}

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Card, Badge, Avatar } from "@/components/ui";
 import { formatDate } from "@/lib/utils";
-import { Calendar, MapPin, Star } from "@phosphor-icons/react";
+import { Calendar, MapPin, Megaphone, Star } from "@phosphor-icons/react";
 import type { Show } from "@/types";
 
 type Props = {
@@ -22,7 +22,12 @@ const statusLabels: Record<string, { text: string; variant: "success" | "gold" |
 };
 
 export function ShowCard({ show, linkTo }: Props) {
-  const status = statusLabels[show.status] ?? statusLabels.setup;
+  // A past-auditions show surfaced by an open casting call reads "Now
+  // Casting" — "Cast" next to a Seeking badge would contradict itself.
+  const status =
+    show.seekingRoles?.length && show.status !== "auditions_open"
+      ? ({ text: "Now Casting", variant: "gold" } as const)
+      : statusLabels[show.status] ?? statusLabels.setup;
 
   const content = (
     <Card interactive={!!linkTo} padding="standard" className={show.isPromoted ? "ring-1 ring-stage-300" : undefined}>
@@ -30,6 +35,16 @@ export function ShowCard({ show, linkTo }: Props) {
         <div className="flex items-center gap-1 mb-2">
           <Star className="w-3.5 h-3.5 text-stage-500" weight="fill" />
           <span className="text-[10px] font-semibold text-stage-600 tracking-wide uppercase">Promoted</span>
+        </div>
+      )}
+      {/* Open supplemental casting call (migration 023) — the reason a
+          past-auditions show is back on Browse/Discover. */}
+      {show.seekingRoles && show.seekingRoles.length > 0 && (
+        <div className="flex items-center gap-1.5 mb-2">
+          <Megaphone className="w-3.5 h-3.5 text-stage-500" weight="duotone" />
+          <span className="text-[11px] font-semibold text-stage-600">
+            Seeking: {show.seekingRoles.join(", ")}
+          </span>
         </div>
       )}
       <div className="flex items-start gap-4">

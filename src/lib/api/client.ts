@@ -1387,11 +1387,7 @@ export async function getAuditionGroups(
     const { data, error } = await getSupabase()
       .from("audition_groups").select("*").eq("show_id", showId).order("sort_order");
     if (error) throw new Error(error.message);
-    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-    return (data ?? []).map((r: any) => ({
-      id: r.id, showId: r.show_id, name: r.name, startTime: r.start_time,
-      endTime: r.end_time, slotCount: r.slot_count, sortOrder: r.sort_order,
-    }));
+    return (data ?? []).map(rowToAuditionGroup);
   }
   await delay();
   return auditionGroups
@@ -1543,6 +1539,114 @@ export async function getOpenAuditions(
         s.status === "auditions_open" &&
         !orgs.find((o) => o.id === s.orgId)?.isArchived
     );
+  }
+
+  // ── Supplemental casting calls (migration 023, spec Feature 1) ──
+  // A show past auditions with an OPEN role-scoped call reappears on
+  // Browse/Discover, badged "Seeking: {roles}". Degrades to a no-op
+  // pre-paste (missing columns → caught → no supplemental shows).
+  if (isSupabaseConfigured) {
+    try {
+      const supabase = getSupabase();
+      const { data: callRows, error: callError } = await supabase
+        .from("audition_groups")
+        .select("show_id, target_role_ids")
+        .eq("supplemental", true)
+        .is("supplemental_closed_at", null);
+      if (callError) throw new Error(callError.message);
+      if (callRows && callRows.length > 0) {
+        /* eslint-disable @typescript-eslint/no-explicit-any */
+        const roleIdsByShow = new Map<string, Set<string>>();
+        for (const r of callRows as any[]) {
+          const set = roleIdsByShow.get(r.show_id) ?? new Set<string>();
+          for (const id of r.target_role_ids ?? []) set.add(id);
+          roleIdsByShow.set(r.show_id, set);
+        }
+        // Role names for the "Seeking" badge (deleted roles simply drop out).
+        const allRoleIds = [...new Set((callRows as any[]).flatMap((r) => r.target_role_ids ?? []))];
+        const roleNameById = new Map<string, string>();
+        if (allRoleIds.length > 0) {
+          const { data: roleRows } = await supabase
+            .from("show_roles").select("id, name, sort_order")
+            .in("id", allRoleIds).order("sort_order");
+          for (const r of roleRows ?? []) roleNameById.set(r.id, r.name);
+        }
+        // Shows surfaced ONLY by their call need fetching (same richest-first
+        // select fallbacks as above; archived theatres stay hidden).
+        const existingIds = new Set(results.map((s) => s.id));
+        const missingIds = [...roleIdsByShow.keys()].filter((id) => !existingIds.has(id));
+        if (missingIds.length > 0) {
+          const selects = viewer
+            ? [ARCHIVED_GEO_SHOW_SELECT, GEO_SHOW_SELECT, ARCHIVED_SHOW_SELECT, SHOW_SELECT]
+            : [ARCHIVED_SHOW_SELECT, SHOW_SELECT];
+          let callShowRows: any[] | null = null;
+          for (const sel of selects) {
+            const res = await supabase.from("shows").select(sel).in("id", missingIds);
+            if (!res.error) {
+              callShowRows = res.data ?? [];
+              break;
+            }
+            if (!/latitude|longitude|is_archived/.test(res.error.message)) {
+              throw new Error(res.error.message);
+            }
+          }
+          for (const r of (callShowRows ?? []).filter((row: any) => !row.orgs?.is_archived)) {
+            const show = rowToShow(r);
+            if (
+              viewer &&
+              typeof r.orgs?.latitude === "number" &&
+              typeof r.orgs?.longitude === "number"
+            ) {
+              show.distanceMiles = haversineMiles(
+                viewer.latitude, viewer.longitude,
+                r.orgs.latitude, r.orgs.longitude
+              );
+            }
+            results.push(show);
+          }
+        }
+        // Badge every surfaced show that has an open call.
+        for (const show of results) {
+          const ids = roleIdsByShow.get(show.id);
+          if (!ids) continue;
+          const names = [...ids]
+            .map((id) => roleNameById.get(id))
+            .filter((n): n is string => !!n);
+          if (names.length > 0) show.seekingRoles = names;
+        }
+        /* eslint-enable @typescript-eslint/no-explicit-any */
+      }
+    } catch (e) {
+      // Pre-migration-023 (columns missing) — supplemental calls just don't
+      // surface yet. Never break Browse/Discover over it.
+      console.warn("Supplemental calls unavailable (migration 023 pending?):", e);
+    }
+  } else {
+    // Mock mode: shows with an open supplemental call reappear too.
+    const openByShow = new Map<string, Set<string>>();
+    for (const g of auditionGroups) {
+      if (!g.supplemental || g.supplementalClosedAt) continue;
+      const set = openByShow.get(g.showId) ?? new Set<string>();
+      for (const id of g.targetRoleIds ?? []) set.add(id);
+      openByShow.set(g.showId, set);
+    }
+    for (const [callShowId, roleIds] of openByShow) {
+      let show = results.find((s) => s.id === callShowId);
+      if (!show) {
+        const src = shows.find(
+          (s) =>
+            s.id === callShowId &&
+            !orgs.find((o) => o.id === s.orgId)?.isArchived
+        );
+        if (!src) continue;
+        show = { ...src };
+        results.push(show);
+      }
+      const names = (allShowRoles[callShowId] ?? [])
+        .filter((r) => roleIds.has(r.id))
+        .map((r) => r.name);
+      if (names.length > 0) show.seekingRoles = names;
+    }
   }
 
   // NOTE: Don't filter by radius here — we return all results
@@ -3091,6 +3195,12 @@ function rowToAuditionGroup(r: any): AuditionGroup {
   return {
     id: r.id, showId: r.show_id, name: r.name, startTime: r.start_time,
     endTime: r.end_time, slotCount: r.slot_count, sortOrder: r.sort_order,
+    // Supplemental casting call columns (migration 023) — absent pre-paste,
+    // so every field degrades to "not a supplemental block".
+    supplemental: r.supplemental ?? false,
+    targetRoleIds: r.target_role_ids ?? [],
+    supplementalNote: r.supplemental_note ?? null,
+    supplementalClosedAt: r.supplemental_closed_at ?? null,
   };
 }
 
@@ -3148,6 +3258,129 @@ export async function deleteAuditionGroup(groupId: string): Promise<void> {
   const idx = auditionGroups.findIndex((g) => g.id === groupId);
   if (idx === -1) throw new Error("Audition group not found.");
   auditionGroups.splice(idx, 1);
+}
+
+// ============================================================
+// SUPPLEMENTAL CASTING CALLS (migration 023 — spec Feature 1)
+// A call = one or more audition_groups rows flagged supplemental,
+// targeting specific roles. Opening one makes the show's public
+// page reframe ("Now casting: …") and reappear on Browse/Discover.
+// ============================================================
+
+/**
+ * Open a supplemental casting call: create the day's audition blocks flagged
+ * `supplemental` + targeting the chosen roles. Cloud writes degrade honestly
+ * pre-paste — a missing-column error becomes a friendly "needs migration 023"
+ * message instead of silently creating ordinary (un-scoped) blocks.
+ */
+export async function createSupplementalCall(input: {
+  showId: string;
+  targetRoleIds: string[];
+  note: string | null;
+  blocks: { name: string; startTime: string; endTime: string; slotCount: number }[];
+  /** For stable ordering after the show's existing blocks. */
+  sortOrderStart: number;
+}): Promise<AuditionGroup[]> {
+  if (input.targetRoleIds.length === 0) {
+    throw new Error("Pick at least one role for the casting call.");
+  }
+  if (input.blocks.length === 0) {
+    throw new Error("The casting call needs at least one audition block.");
+  }
+  if (isSupabaseConfigured) {
+    const rows = input.blocks.map((b, i) => ({
+      show_id: input.showId,
+      name: b.name,
+      start_time: b.startTime,
+      end_time: b.endTime,
+      slot_count: b.slotCount,
+      sort_order: input.sortOrderStart + i,
+      supplemental: true,
+      target_role_ids: input.targetRoleIds,
+      supplemental_note: input.note,
+    }));
+    const { data, error } = await getSupabase()
+      .from("audition_groups").insert(rows).select("*");
+    if (error) {
+      // Pre-migration-023: never create un-scoped blocks by accident.
+      if (/supplemental|target_role_ids/.test(error.message)) {
+        throw new Error(
+          "Supplemental casting calls need a database update (migration 023). Paste it in the Supabase SQL editor and try again."
+        );
+      }
+      throw new Error(error.message);
+    }
+    return (data ?? []).map(rowToAuditionGroup);
+  }
+  await delay(300);
+  const created: AuditionGroup[] = input.blocks.map((b, i) => ({
+    id: `grp-sup-${Date.now()}-${i}`,
+    showId: input.showId,
+    name: b.name,
+    startTime: b.startTime,
+    endTime: b.endTime,
+    slotCount: b.slotCount,
+    sortOrder: input.sortOrderStart + i,
+    supplemental: true,
+    targetRoleIds: [...input.targetRoleIds],
+    supplementalNote: input.note,
+    supplementalClosedAt: null,
+  }));
+  auditionGroups.push(...created);
+  return created;
+}
+
+/**
+ * Manually close a show's open supplemental call (all of its open
+ * supplemental blocks). Signups and blocks are kept for history — the
+ * public page just stops reframing and the show leaves Browse/Discover.
+ */
+export async function closeSupplementalCall(showId: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    const { error } = await getSupabase()
+      .from("audition_groups")
+      .update({ supplemental_closed_at: new Date().toISOString() })
+      .eq("show_id", showId)
+      .eq("supplemental", true)
+      .is("supplemental_closed_at", null);
+    if (error) {
+      if (/supplemental/.test(error.message)) {
+        throw new Error(
+          "Supplemental casting calls need a database update (migration 023)."
+        );
+      }
+      throw new Error(error.message);
+    }
+    return;
+  }
+  await delay(200);
+  const now = new Date().toISOString();
+  for (const g of auditionGroups) {
+    if (g.showId === showId && g.supplemental && !g.supplementalClosedAt) {
+      g.supplementalClosedAt = now;
+    }
+  }
+}
+
+/**
+ * Mock-mode mirror of the migration-023 trigger: an accepted PRIMARY
+ * assignment removes its role from every open call (ensemble pots never
+ * auto-close) and closes calls left with no sought roles. Cloud mode gets
+ * this from the SECURITY DEFINER trigger instead (the actor accepting the
+ * offer has no RLS right to touch audition_groups).
+ */
+function mockAutoCloseSupplementalCalls(showId: string, roleId: string) {
+  const role = (allShowRoles[showId] ?? []).find((r) => r.id === roleId);
+  if (role && (role.roleType === "ensemble" || role.roleType === "featured_ensemble")) {
+    return; // ensemble pots can always take more members
+  }
+  const now = new Date().toISOString();
+  for (const g of auditionGroups) {
+    if (g.showId !== showId || !g.supplemental || g.supplementalClosedAt) continue;
+    if (!(g.targetRoleIds ?? []).includes(roleId)) continue;
+    g.targetRoleIds = (g.targetRoleIds ?? []).filter((id) => id !== roleId);
+    if (g.targetRoleIds.length === 0) g.supplementalClosedAt = now;
+  }
 }
 
 // ============================================================
@@ -3519,6 +3752,10 @@ export async function acceptCastOffer(assignmentId: string): Promise<CastAssignm
     (s) => s.showId === assignment.showId && s.actorId === assignment.actorId
   );
   if (signup) signup.status = "cast";
+  // Filling a targeted role closes its supplemental call (trigger in cloud).
+  if (assignment.assignmentType === "primary") {
+    mockAutoCloseSupplementalCalls(assignment.showId, assignment.roleId);
+  }
   return assignment;
 }
 

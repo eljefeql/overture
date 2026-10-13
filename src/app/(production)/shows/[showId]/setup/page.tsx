@@ -71,6 +71,7 @@ import {
 import { SHOW_STATUS_LABELS } from "@/lib/constants";
 import { defaultOfferAgreements, effectiveOfferAgreements, parseAgreement } from "@/lib/offerAgreements";
 import type { ShowStatus, ShowType, RoleType, GenderReq, TeamRole } from "@/types";
+import { isOpenSupplementalGroup } from "@/types";
 
 /* ============================================================
    Show Setup — Home base for a show. View + edit all config.
@@ -1055,6 +1056,50 @@ export default function ShowSetupPage() {
               </div>
             )}
           </Card>
+
+          {/* Need to recast a role? (spec Feature 1) — late-stage shows only.
+              The casting board is where role-scoped calls are opened. */}
+          {["callbacks", "casting", "cast"].includes(show.status) && roles.length > 0 && (
+            <Card variant="flat" className="animate-fade-up" style={{ animationDelay: "145ms" }}>
+              <SectionHeader>Need to Recast a Role?</SectionHeader>
+              {groups.some(isOpenSupplementalGroup) ? (
+                <p className="text-sm text-curtain-800 mb-3 flex items-start gap-2">
+                  <Megaphone className="w-4 h-4 text-stage-500 flex-shrink-0 mt-0.5" weight="duotone" />
+                  <span>
+                    A casting call is open
+                    {(() => {
+                      const names = roles
+                        .filter((r) =>
+                          groups.some(
+                            (g) =>
+                              isOpenSupplementalGroup(g) &&
+                              (g.targetRoleIds ?? []).includes(r.id)
+                          )
+                        )
+                        .map((r) => r.name);
+                      return names.length > 0 ? <> — seeking {names.join(", ")}</> : null;
+                    })()}
+                    . Manage it from the Casting board.
+                  </span>
+                </p>
+              ) : (
+                <p className="text-sm text-clay-500 mb-3">
+                  Lost someone after casting? Open a role-scoped casting call
+                  from the Casting board — the show reappears for actors
+                  seeking just that role, without touching your cast list.
+                </p>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-center"
+                onClick={() => router.push(`/shows/${showId}/casting`)}
+                icon={<Megaphone className="w-4 h-4 text-stage-500" weight="duotone" />}
+              >
+                Open the Casting Board
+              </Button>
+            </Card>
+          )}
 
           {/* Quick Actions */}
           <Card variant="flat" className="animate-fade-up" style={{ animationDelay: "150ms" }}>

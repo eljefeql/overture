@@ -156,6 +156,11 @@ export type Show = {
   state: string;
   distanceMiles: number | null;
   isPromoted: boolean;
+  /** Role names an OPEN supplemental casting call is seeking (migration 023).
+   *  Populated only by getOpenAuditions for shows surfaced via a call —
+   *  drives the "Seeking: {roles}" badge on Browse/Discover. Optional so
+   *  every other Show read stays valid. */
+  seekingRoles?: string[];
 } & Timestamps;
 
 export type ShowRole = {
@@ -189,7 +194,23 @@ export type AuditionGroup = {
   endTime: string;
   slotCount: number;
   sortOrder: number;
+  /** Supplemental casting call (migration 023) — all optional so legacy
+   *  mock rows and pre-paste cloud reads stay valid. A block with
+   *  `supplemental` true belongs to a role-scoped casting call. */
+  supplemental?: boolean;
+  /** The role ids the call is seeking; roles are removed as they fill. */
+  targetRoleIds?: ID[];
+  /** Optional public note ("seeking a strong tenor"). */
+  supplementalNote?: string | null;
+  /** Null/absent = the call is OPEN; set when closed (manually, or
+   *  automatically when every targeted role gains an accepted primary). */
+  supplementalClosedAt?: string | null;
 };
+
+/** Is this block part of a currently-open supplemental casting call? */
+export function isOpenSupplementalGroup(g: AuditionGroup): boolean {
+  return !!g.supplemental && !g.supplementalClosedAt;
+}
 
 export type AuditionSignup = {
   id: ID;

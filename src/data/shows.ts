@@ -1046,6 +1046,40 @@ export const showTeam: ShowTeamMember[] = [
 // AUDITION GROUPS
 // ============================================================
 
+/**
+ * Noises Off's open supplemental casting call (demo data for spec Feature 1).
+ * Three 20-minute blocks on an evening ~10 days from "today" so the demo
+ * always shows an upcoming, signable call.
+ */
+function supplementalCallBlocks(): AuditionGroup[] {
+  const day = new Date();
+  day.setDate(day.getDate() + 10);
+  const blockAt = (hour: number, minute: number, lengthMin: number) => {
+    const start = new Date(day);
+    start.setHours(hour, minute, 0, 0);
+    const end = new Date(start.getTime() + lengthMin * 60 * 1000);
+    return {
+      name: start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+      startTime: start.toISOString(),
+      endTime: end.toISOString(),
+    };
+  };
+  const shared = {
+    showId: "show-12",
+    slotCount: 4,
+    supplemental: true,
+    targetRoleIds: ["role-no9"], // Selsdon Mowbray — vacated after publish
+    supplementalNote:
+      "We're recasting Selsdon after a cast change — seeking an older comedic actor who can play gloriously unreliable. Sides provided at the call.",
+    supplementalClosedAt: null,
+  };
+  return [
+    { id: "grp-no-s1", sortOrder: 100, ...shared, ...blockAt(18, 0, 20) },
+    { id: "grp-no-s2", sortOrder: 101, ...shared, ...blockAt(18, 20, 20) },
+    { id: "grp-no-s3", sortOrder: 102, ...shared, ...blockAt(18, 40, 20) },
+  ];
+}
+
 export const auditionGroups: AuditionGroup[] = [
   // ── Into the Woods (show-1) — Apr 14 ──
   { id: "grp-1", showId: "show-1", name: "Group 1", startTime: "2026-04-14T18:00:00", endTime: "2026-04-14T18:30:00", slotCount: 5, sortOrder: 0 },
@@ -1117,6 +1151,13 @@ export const auditionGroups: AuditionGroup[] = [
   { id: "grp-re3", showId: "show-11", name: "Sunday 3:00 PM", startTime: "2026-02-22T15:00:00", endTime: "2026-02-22T15:30:00", slotCount: 5, sortOrder: 2 },
   { id: "grp-re4", showId: "show-11", name: "Monday 6:00 PM", startTime: "2026-02-23T18:00:00", endTime: "2026-02-23T18:30:00", slotCount: 6, sortOrder: 3 },
   { id: "grp-re5", showId: "show-11", name: "Monday 6:30 PM", startTime: "2026-02-23T18:30:00", endTime: "2026-02-23T19:00:00", slotCount: 6, sortOrder: 4 },
+
+  // ── Noises Off (show-12) — OPEN SUPPLEMENTAL CASTING CALL (spec Feature 1) ──
+  // The show is cast, but Selsdon Mowbray was vacated (see castAssignments) —
+  // this role-scoped call makes the show reappear on Browse/Discover and
+  // reframes its public page. Dates generated relative to today so the demo
+  // always has an upcoming call night.
+  ...supplementalCallBlocks(),
 ];
 
 // ============================================================
@@ -1155,7 +1196,9 @@ export const castAssignments: CastAssignment[] = [
   { id: "ca-59", showId: "show-12", roleId: "role-no6", roleName: "Belinda Blair / Flavia", actorId: "actor-17", actorName: "Rachel Goldstein", assignmentType: "primary", status: "accepted", sortOrder: 0 },
   { id: "ca-60", showId: "show-12", roleId: "role-no7", roleName: "Tim Allgood", actorId: "actor-3", actorName: "Alex Rivera", assignmentType: "primary", status: "sent", sortOrder: 0 },
   { id: "ca-61", showId: "show-12", roleId: "role-no8", roleName: "Poppy Norton-Taylor", actorId: "actor-8", actorName: "Jenny Park", assignmentType: "primary", status: "accepted", sortOrder: 0 },
-  { id: "ca-62", showId: "show-12", roleId: "role-no9", roleName: "Selsdon Mowbray", actorId: "actor-20", actorName: "Greg Nakamura", assignmentType: "primary", status: "accepted", sortOrder: 0 },
+  // Greg had to step away after the cast list published — Selsdon is VACATED,
+  // and the open supplemental casting call below is recruiting his replacement.
+  { id: "ca-62", showId: "show-12", roleId: "role-no9", roleName: "Selsdon Mowbray", actorId: "actor-20", actorName: "Greg Nakamura", assignmentType: "primary", status: "withdrawn", sortOrder: 0 },
 
   // ── Our Town (show-13) — archived, all accepted ──
   { id: "ca-63", showId: "show-13", roleId: "role-ot1", roleName: "Stage Manager", actorId: "actor-5", actorName: "Marcus Bell", assignmentType: "primary", status: "accepted", sortOrder: 0 },

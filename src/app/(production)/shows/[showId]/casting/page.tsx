@@ -9,9 +9,12 @@ import {
   getCallbacks,
   getCastAssignments,
   getAuditionSignups,
+  getAuditionGroups,
   getShowConflicts,
   createCastAssignment,
   updateCastAssignment,
+  createSupplementalCall,
+  closeSupplementalCall,
   publishCastList,
   sendOffers,
 } from "@/lib/api/client";
@@ -39,12 +42,13 @@ import {
   PageSkeleton,
   EmptyState,
   Input,
+  Textarea,
 } from "@/components/ui";
 import { TeamNotesFeed } from "@/components/casting/TeamNotesFeed";
 import { useUIStore } from "@/stores/useUIStore";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/features/auth/AuthContext";
-import { formatHeight, formatRoleGender } from "@/lib/utils";
+import { formatHeight, formatRoleGender, formatDate, formatTime } from "@/lib/utils";
 import {
   Users,
   Warning,
@@ -62,9 +66,12 @@ import {
   ArrowRight,
   ArrowSquareOut,
   UsersThree,
+  LinkSimple,
 } from "@phosphor-icons/react";
 import Link from "next/link";
-import type { CastAssignment, AssignmentType, RoleType } from "@/types";
+import { publicShareUrl, copyText } from "@/lib/share";
+import type { CastAssignment, AssignmentType, RoleType, ShowStatus, ShowRole } from "@/types";
+import { isOpenSupplementalGroup } from "@/types";
 
 /* ============================================================
    Casting Board — Role-based assignment list
@@ -86,6 +93,16 @@ const ASSIGNMENT_BADGE: Record<AssignmentType, string> = {
 /** Ensemble-type roles are a "pot" — they hold many people at once. */
 const isEnsembleRoleType = (t: RoleType) =>
   t === "ensemble" || t === "featured_ensemble";
+
+/** Statuses past auditions_closed — where a supplemental casting call can be
+ *  opened (SUPPLEMENTAL_AND_PRECAST_SPEC.md, Feature 1). The show's status
+ *  NEVER moves backward; a call is orthogonal to the status machine. */
+const SUPPLEMENTAL_CALL_STATUSES: ShowStatus[] = [
+  "callbacks",
+  "casting",
+  "cast",
+  "archived",
+];
 
 /** One person the assign modal can offer for a role, with their context. */
 type RoleCandidate = {
@@ -130,18 +147,28 @@ export default function CastingBoardPage() {
   const [candidateSearch, setCandidateSearch] = useState("");
   const [showEveryone, setShowEveryone] = useState(false);
 
+  // ── Supplemental casting call (spec Feature 1) ──
+  const [callModalOpen, setCallModalOpen] = useState(false);
+  const [callRoleIds, setCallRoleIds] = useState<Set<string>>(new Set());
+  const [callNote, setCallNote] = useState("");
+  const [callDraft, setCallDraft] = useState({
+    date: "", startTime: "18:00", endTime: "20:00", blockMinutes: 20, capacity: 4,
+  });
+  const [closeCallConfirmOpen, setCloseCallConfirmOpen] = useState(false);
+
   // ── Data fetching ──
   const { data, isLoading, isError } = useQuery({
     queryKey: ["casting", showId],
     queryFn: async () => {
-      const [show, roles, cbs, assignments, signups] = await Promise.all([
+      const [show, roles, cbs, assignments, signups, groups] = await Promise.all([
         getShow(showId),
         getShowRoles(showId),
         getCallbacks(showId),
         getCastAssignments(showId),
         getAuditionSignups(showId),
+        getAuditionGroups(showId),
       ]);
-      return { show, roles, callbacks: cbs, assignments, signups };
+      return { show, roles, callbacks: cbs, assignments, signups, groups };
     },
   });
 
@@ -257,6 +284,43 @@ export default function CastingBoardPage() {
     onError: (err: Error) => toast("error", err.message),
   });
 
+  // Invalidate everything a casting call touches: this board, the auditions
+  // board (new blocks), the public page's groups, and Browse/Discover.
+  const invalidateCallSurfaces = () => {
+    queryClient.invalidateQueries({ queryKey: ["casting", showId] });
+    queryClient.invalidateQueries({ queryKey: ["auditions", showId] });
+    queryClient.invalidateQueries({ queryKey: ["showSetup", showId] });
+    queryClient.invalidateQueries({ queryKey: ["auditionGroups", showId] });
+    queryClient.invalidateQueries({ queryKey: ["openAuditions"] });
+  };
+
+  const openCallMutation = useMutation({
+    mutationFn: (input: Parameters<typeof createSupplementalCall>[0]) =>
+      createSupplementalCall(input),
+    onSuccess: (created) => {
+      invalidateCallSurfaces();
+      toast(
+        "success",
+        `Casting call opened — ${created.length} audition block${created.length !== 1 ? "s" : ""} published. The show is back on Browse for actors.`
+      );
+      setCallModalOpen(false);
+      setCallRoleIds(new Set());
+      setCallNote("");
+      setCallDraft({ date: "", startTime: "18:00", endTime: "20:00", blockMinutes: 20, capacity: 4 });
+    },
+    onError: (err: Error) => toast("error", err.message),
+  });
+
+  const closeCallMutation = useMutation({
+    mutationFn: () => closeSupplementalCall(showId),
+    onSuccess: () => {
+      invalidateCallSurfaces();
+      toast("info", "Casting call closed. Signups and blocks are kept for your records.");
+      setCloseCallConfirmOpen(false);
+    },
+    onError: (err: Error) => toast("error", err.message),
+  });
+
   const sendOffersMutation = useMutation({
     mutationFn: () => sendOffers(showId),
     onSuccess: (count) => {
@@ -282,7 +346,7 @@ export default function CastingBoardPage() {
     </div>
   );
 
-  const { show, roles, callbacks: cbs, assignments, signups } = data;
+  const { show, roles, callbacks: cbs, assignments, signups, groups } = data;
 
   // Active assignments (not withdrawn)
   const activeAssignments = assignments.filter((a) => a.status !== "withdrawn");
@@ -313,6 +377,108 @@ export default function CastingBoardPage() {
   // Get assignments for a specific role
   const getAssignmentsForRole = (roleId: string) =>
     activeAssignments.filter((a) => a.roleId === roleId);
+
+  // ── Supplemental casting call (spec Feature 1) ──
+  const callsAvailable = SUPPLEMENTAL_CALL_STATUSES.includes(show.status);
+  const openCallGroups = (groups ?? []).filter(isOpenSupplementalGroup);
+  const hasOpenCall = openCallGroups.length > 0;
+  const openCallRoleIds = new Set(openCallGroups.flatMap((g) => g.targetRoleIds ?? []));
+  const openCallRoleNames = (roles ?? [])
+    .filter((r) => openCallRoleIds.has(r.id))
+    .map((r) => r.name);
+  const openCallSignupCount = signups.filter(
+    (s) => s.groupId && openCallGroups.some((g) => g.id === s.groupId)
+  ).length;
+
+  // "Unfilled or vacated" = no accepted or pending (sent) PRIMARY assignment.
+  // Ensemble pots are always callable — more members is always valid.
+  const isRoleCallable = (role: ShowRole) => {
+    if (isEnsembleRoleType(role.roleType)) return true;
+    return !activeAssignments.some(
+      (a) =>
+        a.roleId === role.id &&
+        a.assignmentType === "primary" &&
+        (a.status === "accepted" || a.status === "sent")
+    );
+  };
+  const callableRoles = (roles ?? []).filter(isRoleCallable);
+
+  const openCallModal = (roleId?: string) => {
+    setCallRoleIds(new Set(roleId ? [roleId] : []));
+    setCallNote("");
+    setCallDraft({ date: "", startTime: "18:00", endTime: "20:00", blockMinutes: 20, capacity: 4 });
+    setCallModalOpen(true);
+  };
+
+  const toggleCallRole = (roleId: string) => {
+    setCallRoleIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(roleId)) next.delete(roleId);
+      else next.add(roleId);
+      return next;
+    });
+  };
+
+  // Day-based block generation — same approach as the setup page's
+  // "Generate a Day" (local instants serialized to UTC).
+  const computeCallBlocks = () => {
+    if (!callDraft.date || !callDraft.startTime || !callDraft.endTime) return [];
+    const start = new Date(`${callDraft.date}T${callDraft.startTime}:00`);
+    const end = new Date(`${callDraft.date}T${callDraft.endTime}:00`);
+    const stepMs = callDraft.blockMinutes * 60 * 1000;
+    if (!(end > start) || stepMs <= 0) return [];
+    const blocks: { name: string; startTime: string; endTime: string; slotCount: number }[] = [];
+    let cursor = start.getTime();
+    let guard = 0;
+    while (cursor < end.getTime() && guard < 200) {
+      const blockStart = new Date(cursor);
+      const blockEnd = new Date(Math.min(cursor + stepMs, end.getTime()));
+      blocks.push({
+        name: blockStart.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+        startTime: blockStart.toISOString(),
+        endTime: blockEnd.toISOString(),
+        slotCount: callDraft.capacity,
+      });
+      cursor += stepMs;
+      guard++;
+    }
+    return blocks;
+  };
+  const callPreviewBlocks = computeCallBlocks();
+
+  const submitCall = () => {
+    if (callRoleIds.size === 0) {
+      toast("error", "Pick at least one role for the casting call.");
+      return;
+    }
+    if (!callDraft.date) {
+      toast("error", "Pick an audition date for the call.");
+      return;
+    }
+    if (callDraft.endTime <= callDraft.startTime) {
+      toast("error", "End time must be after start time.");
+      return;
+    }
+    if (callPreviewBlocks.length === 0) {
+      toast("error", "That window doesn't produce any blocks — check your times.");
+      return;
+    }
+    openCallMutation.mutate({
+      showId,
+      targetRoleIds: [...callRoleIds],
+      note: callNote.trim() || null,
+      blocks: callPreviewBlocks,
+      sortOrderStart: (groups?.length ?? 0) + 100,
+    });
+  };
+
+  const copyCallLink = async () => {
+    if (await copyText(publicShareUrl(`/auditions/${showId}`))) {
+      toast("success", "Public link copied to clipboard!");
+    } else {
+      toast("error", "Couldn't copy — try again.");
+    }
+  };
 
   // Build the full candidate pool for a role (QA finding 11): everyone who
   // auditioned (plus anyone with an accepted callback), minus people already
@@ -559,6 +725,36 @@ export default function CastingBoardPage() {
         </div>
       )}
 
+      {/* ── Open supplemental casting call (spec Feature 1) ── */}
+      {hasOpenCall && (
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-stage-50 border border-stage-200 rounded-xl mb-6 animate-fade-up" style={{ animationDelay: "35ms" }}>
+          <div className="flex items-center gap-3 min-w-0">
+            <Megaphone className="w-5 h-5 text-stage-600 flex-shrink-0" weight="duotone" />
+            <p className="text-sm text-curtain-800 min-w-0">
+              <strong>Casting call open</strong>
+              {openCallRoleNames.length > 0 && (
+                <> — seeking {openCallRoleNames.join(", ")}</>
+              )}
+              {" · "}
+              {openCallSignupCount} signup{openCallSignupCount !== 1 ? "s" : ""} so far
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <a href={`/auditions/${showId}`} target="_blank" rel="noopener noreferrer">
+              <Button variant="ghost" size="sm" icon={<ArrowSquareOut className="w-4 h-4 text-stage-500" weight="duotone" />}>
+                View public page
+              </Button>
+            </a>
+            <Button variant="ghost" size="sm" onClick={copyCallLink} icon={<LinkSimple className="w-4 h-4 text-stage-500" weight="duotone" />}>
+              Copy link
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setCloseCallConfirmOpen(true)}>
+              Close call
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* ── Unfilled Alert ── */}
       {unfilledRoles > 0 && (
         <div className="flex items-center gap-3 p-3 bg-stage-50 border border-stage-200 rounded-xl mb-6 animate-fade-up" style={{ animationDelay: "50ms" }}>
@@ -604,9 +800,27 @@ export default function CastingBoardPage() {
                       </span>
                     )}
                   </div>
-                  <span className="text-xs text-clay-400">
-                    {candidateCount} candidate{candidateCount !== 1 ? "s" : ""}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {/* Per-role "Open a casting call" (spec Feature 1) —
+                        unfilled/vacated roles (ensemble pots always) on
+                        late-status shows; hidden while this role is already
+                        sought by an open call. */}
+                    {callsAvailable &&
+                      isRoleCallable(role) &&
+                      !openCallRoleIds.has(role.id) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openCallModal(role.id)}
+                          icon={<Megaphone className="w-4 h-4 text-stage-500" weight="duotone" />}
+                        >
+                          Open a casting call
+                        </Button>
+                      )}
+                    <span className="text-xs text-clay-400">
+                      {candidateCount} candidate{candidateCount !== 1 ? "s" : ""}
+                    </span>
+                  </div>
                 </CardHeader>
 
                 {isEnsemble ? (
@@ -1026,6 +1240,181 @@ export default function CastingBoardPage() {
         onCast={castFromCompare}
         castPending={assignMutation.isPending}
       />
+
+      {/* ── Open a Casting Call (spec Feature 1) ── */}
+      <Modal
+        open={callModalOpen}
+        onClose={() => setCallModalOpen(false)}
+        title="Open a Casting Call"
+      >
+        <div className="py-4 flex flex-col gap-5 max-h-[70vh] overflow-y-auto">
+          <p className="text-sm text-clay-500">
+            A role-scoped mini-audition. The show&apos;s public page reframes to
+            &ldquo;Now casting,&rdquo; and the show reappears on Browse for
+            actors while the call is open. Your cast list and show status are
+            untouched.
+          </p>
+
+          {/* Roles */}
+          <div>
+            <label className="block text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-2">
+              Which role{callableRoles.length !== 1 ? "s" : ""} are you casting?
+            </label>
+            {callableRoles.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {callableRoles.map((role) => (
+                  <Pill
+                    key={role.id}
+                    variant="role"
+                    active={callRoleIds.has(role.id)}
+                    onClick={() => toggleCallRole(role.id)}
+                  >
+                    {role.name}
+                  </Pill>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-clay-500">
+                Every role has an accepted or pending primary right now —
+                there&apos;s nothing to recast.
+              </p>
+            )}
+            <p className="text-[11px] text-clay-400 mt-2">
+              Only unfilled or vacated roles are listed. Ensemble roles are
+              always available — an ensemble can take more members anytime.
+            </p>
+          </div>
+
+          {/* Audition day — reuses the day-based generator */}
+          <div>
+            <label className="block text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-2">
+              Audition day &amp; blocks
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="col-span-2 sm:col-span-1">
+                <label className="text-[11px] font-semibold text-clay-500">Date</label>
+                <Input
+                  type="date"
+                  value={callDraft.date}
+                  onChange={(e) => setCallDraft({ ...callDraft, date: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-clay-500">Start</label>
+                <Input
+                  type="time"
+                  value={callDraft.startTime}
+                  onChange={(e) => setCallDraft({ ...callDraft, startTime: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-clay-500">End</label>
+                <Input
+                  type="time"
+                  value={callDraft.endTime}
+                  onChange={(e) => setCallDraft({ ...callDraft, endTime: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-clay-500">Block length (min)</label>
+                <Input
+                  type="number"
+                  min={5}
+                  value={String(callDraft.blockMinutes)}
+                  onChange={(e) =>
+                    setCallDraft({ ...callDraft, blockMinutes: Number(e.target.value) || 0 })
+                  }
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-clay-500">Actors per block</label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={String(callDraft.capacity)}
+                  onChange={(e) =>
+                    setCallDraft({ ...callDraft, capacity: Number(e.target.value) || 1 })
+                  }
+                />
+              </div>
+            </div>
+            {callDraft.date && callPreviewBlocks.length > 0 && (
+              <p className="text-xs text-clay-500 mt-2">
+                {formatDate(callDraft.date)} · {callPreviewBlocks.length} block
+                {callPreviewBlocks.length !== 1 ? "s" : ""} (
+                {formatTime(callPreviewBlocks[0].startTime)} –{" "}
+                {formatTime(callPreviewBlocks[callPreviewBlocks.length - 1].endTime)}),{" "}
+                {callDraft.capacity} actor{callDraft.capacity !== 1 ? "s" : ""} each
+              </p>
+            )}
+          </div>
+
+          {/* Public note */}
+          <div>
+            <label className="block text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-2">
+              Public note <span className="normal-case font-normal text-clay-400">(optional)</span>
+            </label>
+            <Textarea
+              value={callNote}
+              onChange={(e) => setCallNote(e.target.value)}
+              rows={2}
+              placeholder="e.g. Seeking a strong tenor — sides provided at the call."
+            />
+            <p className="text-[11px] text-clay-400 mt-1">
+              Shown to actors on the public audition page.
+            </p>
+          </div>
+
+          <div className="flex justify-end gap-3">
+            <Button variant="ghost" onClick={() => setCallModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={submitCall}
+              loading={openCallMutation.isPending}
+              disabled={callableRoles.length === 0}
+              icon={<Megaphone className="w-4 h-4" weight="bold" />}
+            >
+              Open Casting Call
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Close Casting Call Confirmation ── */}
+      <Modal
+        open={closeCallConfirmOpen}
+        onClose={() => setCloseCallConfirmOpen(false)}
+        title="Close Casting Call"
+      >
+        <div className="flex flex-col items-center text-center py-4">
+          <Megaphone className="w-12 h-12 text-stage-500 mb-3" weight="duotone" />
+          <p className="text-sm text-curtain-800 mb-2">
+            Close the open casting call
+            {openCallRoleNames.length > 0 && (
+              <> for <strong>{openCallRoleNames.join(", ")}</strong></>
+            )}
+            ?
+          </p>
+          <p className="text-xs text-clay-500 mb-6 max-w-sm">
+            The show leaves Browse and its public page stops taking casting-call
+            signups. Blocks and signups you already have are kept. (Filling a
+            sought role closes its call automatically, too.)
+          </p>
+          <div className="flex gap-3">
+            <Button variant="ghost" onClick={() => setCloseCallConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => closeCallMutation.mutate()}
+              loading={closeCallMutation.isPending}
+            >
+              Close Call
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* ── Remove Assignment Confirmation ── */}
       <Modal open={removeConfirmOpen} onClose={() => setRemoveConfirmOpen(false)} title="Remove Assignment">
