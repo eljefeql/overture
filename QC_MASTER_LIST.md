@@ -56,6 +56,18 @@ findings (3), Fiddler population findings (2), carried infrastructure. Status mo
 - Supabase custom auth domain (paid) — when Stripe turns on.
 - Email digest (spec'd).
 
+
+## Hub polish wave (owner findings 2026-10-13, approved — builds after the conflicts wave)
+
+| # | Item | Notes |
+|---|---|---|
+| 29 | Hub "My conflicts" (living cast conflict list) + conflict-aware scheduling (absorbs #17) | IN PROGRESS — migration 025. Cast add/remove date ranges on the Hub; union with audition conflicts feeds Conflict Calendar + rehearsal counts; "N people have conflicts that day" in the add-rehearsal modal. |
+| 30 | Who to Contact rows carry real contact info | Team enters shareable phone/email per routing row; tappable inline. |
+| 31 | People section rebuilt: team first, prominent cards; cast as compact headshot grid, principals above ensemble | Kills the right-side whitespace. |
+| 32 | Contact flow rethink ("HOLY SHIT YES") | Mobile: tel:/sms: natural taps. Desktop: copy-to-clipboard. NEW "Send a note" to any team member → in-app notification + email via Resend (reply-to sender). Seed of per-show messaging. |
+| 33 | Resources: files AND links | "Add a link" (Drive/YouTube/docs) beside upload; link icon + title; storage stays external. Small migration (show_files.url). |
+| 34 | Hub header: theatre name, key dates, poster | Hub reads as this show's home at a glance. |
+
 ## New candidates (found during P1, untriaged)
 
 - Cast-list page Share button copies the TEAM-GATED production URL — recipients without access hit a lock screen. Should share the public cast list (or be removed until one exists).
