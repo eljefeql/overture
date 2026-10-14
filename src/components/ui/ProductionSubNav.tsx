@@ -98,8 +98,11 @@ export function ProductionSubNav({ showId, showStatus = "setup", precast = false
         if (pathname?.includes(`/${tab.segment}`)) return true;
         switch (tab.segment) {
           case "auditions":
-          case "conflicts":
             return modules?.hasAuditions ?? false;
+          case "conflicts":
+            // Always: cast record conflicts on the Hub ("My conflicts"),
+            // so the Conflict Calendar is useful without any auditions.
+            return true;
           case "callbacks":
             return modules?.hasCallbacks ?? false;
           case "offers":

@@ -195,7 +195,11 @@ export default function ConflictCalendarPage() {
         <EmptyState
           icon={<CalendarX className="w-12 h-12" weight="duotone" />}
           title="No dates to map yet"
-          description="Set your audition or rehearsal dates on the Setup page and the conflict calendar will build itself from actor signups."
+          description={
+            show.precast
+              ? "Set your rehearsal start and opening dates on the Setup page and the conflict calendar will build itself from what your cast adds on the Show Hub."
+              : "Set your audition or rehearsal dates on the Setup page and the conflict calendar will build itself from actor signups."
+          }
           action={
             <Link href={`/shows/${showId}/setup`}>
               <Button>Go to Setup</Button>
@@ -353,11 +357,21 @@ export default function ConflictCalendarPage() {
         <EmptyState
           icon={<CalendarX className="w-12 h-12" weight="duotone" />}
           title="No conflicts to map yet"
-          description="As actors sign up to audition, the conflict dates they enter appear here automatically. Share your public audition link to get signups rolling."
+          description={
+            show.precast
+              ? "Your cast adds the dates they can't rehearse under “My conflicts” on the Show Hub — everything they enter appears here automatically. A quick announcement asking everyone to fill it in works wonders."
+              : "As actors sign up to audition, the conflict dates they enter appear here automatically. Share your public audition link to get signups rolling."
+          }
           action={
-            <Link href={`/shows/${showId}/setup`}>
-              <Button>Share Your Audition Page</Button>
-            </Link>
+            show.precast ? (
+              <Link href={`/shows/${showId}/hub`}>
+                <Button>Open the Show Hub</Button>
+              </Link>
+            ) : (
+              <Link href={`/shows/${showId}/setup`}>
+                <Button>Share Your Audition Page</Button>
+              </Link>
+            )
           }
         />
       ) : (
