@@ -23,6 +23,7 @@ import {
   volunteerNeeds as mockVolunteerNeeds,
   volunteerSignups as mockVolunteerSignups,
   memberConflicts as mockMemberConflicts,
+  showLinks as mockShowLinks,
   type MockVolunteerNeed,
 } from "@/data/hub";
 import { shows as mockShows } from "@/data/shows";
@@ -804,7 +805,9 @@ function rowToShowFile(r: any): ShowFile {
   return {
     id: r.id,
     showId: r.show_id,
-    storagePath: r.storage_path,
+    storagePath: r.storage_path ?? null,
+    // Pre-026 rows have no url column → null (a file row).
+    url: r.url ?? null,
     label: r.label,
     category: r.category ?? null,
     sizeBytes: r.size_bytes ?? null,
@@ -829,7 +832,12 @@ export async function getShowFiles(showId: string): Promise<ShowFile[]> {
     }
   }
   await delay();
-  return []; // Mock mode has no storage — the hub shows a cloud-only note.
+  // Mock mode has no storage (uploads show a cloud-only note) but links
+  // work end to end — the demo's Resources card shows them.
+  return mockShowLinks
+    .filter((l) => l.showId === showId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map((l) => ({ ...l }));
 }
 
 export async function uploadShowFile(
@@ -872,11 +880,98 @@ export async function uploadShowFile(
 }
 
 export async function deleteShowFile(file: ShowFile): Promise<void> {
-  if (!isSupabaseConfigured) return;
+  if (!isSupabaseConfigured) {
+    await delay(150);
+    const idx = mockShowLinks.findIndex((l) => l.id === file.id);
+    if (idx !== -1) mockShowLinks.splice(idx, 1);
+    return;
+  }
   const supabase = getSupabase();
   const { error } = await supabase.from("show_files").delete().eq("id", file.id);
   if (error) throw new Error(error.message);
-  await supabase.storage.from(SHOW_FILES_BUCKET).remove([file.storagePath]);
+  // Link rows (migration 026) have nothing in storage to remove.
+  if (file.storagePath) {
+    await supabase.storage.from(SHOW_FILES_BUCKET).remove([file.storagePath]);
+  }
+}
+
+/* ── Links (migration 026) — Resources holds links beside files ── */
+
+const MIGRATION_026_LINKS_MSG =
+  "Adding links needs a database update (migration 026). The link was NOT saved — let your Overture admin know. Uploads still work in the meantime.";
+
+/** Postgres "column does not exist" (42703), a CHECK violation on the old
+ *  NOT NULL storage_path (23502), or PostgREST's schema-cache miss — all
+ *  mean migration 026 hasn't been pasted. */
+function isMissingColumn(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  if (err.code === "42703" || err.code === "23502" || err.code === "PGRST204") return true;
+  const m = (err.message ?? "").toLowerCase();
+  return m.includes("does not exist") || m.includes("schema cache") || m.includes("null value");
+}
+
+/**
+ * Validate a user-typed resource link: http(s) only (never javascript:/data:),
+ * a protocol added when missing. Returns the normalized URL or null.
+ */
+export function normalizeLinkUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const withProto = /^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const u = new URL(withProto);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    if (!u.hostname.includes(".")) return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+export async function addShowLink(input: {
+  showId: ID;
+  title: string;
+  url: string;
+  userId: ID;
+}): Promise<ShowFile> {
+  const url = normalizeLinkUrl(input.url);
+  if (!url) throw new Error("That doesn't look like a web link — it needs to start with http:// or https://.");
+  const label = input.title.trim() || url.replace(/^https?:\/\//, "").slice(0, 80);
+  if (isSupabaseConfigured) {
+    const { data: row, error } = await getSupabase()
+      .from("show_files")
+      .insert({
+        show_id: input.showId,
+        storage_path: null,
+        url,
+        label,
+        category: "link",
+        uploaded_by: input.userId,
+      })
+      .select("*")
+      .single();
+    if (error) {
+      // Deliberately LOUD pre-paste — silently "saving" a link that never
+      // lands would be worse than an error.
+      if (isMissingColumn(error)) throw new Error(MIGRATION_026_LINKS_MSG);
+      throw new Error(error.message);
+    }
+    return rowToShowFile(row);
+  }
+  await delay(250);
+  const link: ShowFile = {
+    id: `link-${Date.now()}`,
+    showId: input.showId,
+    storagePath: null,
+    url,
+    label,
+    category: "link",
+    sizeBytes: null,
+    uploadedBy: input.userId,
+    createdAt: new Date().toISOString(),
+  };
+  mockShowLinks.unshift(link);
+  return link;
 }
 
 /** Short-lived signed URL — the show-files bucket is private. */
@@ -886,6 +981,75 @@ export async function getShowFileUrl(path: string): Promise<string> {
     .createSignedUrl(path, 120);
   if (error) throw new Error(error.message);
   return data.signedUrl;
+}
+
+/* ============================================================
+   Send a note (QC #32) — a production member writes a short note
+   to a PRODUCTION TEAM member; it lands as an in-app notification
+   and rides the notifications → send-notification-email pipeline
+   with Reply-To = the sender (migration 026's send_show_note).
+   Pre-paste: falls back to create_notification (uncategorized →
+   still emails, just without Reply-To). v1 recipients are team
+   members only — cast-to-cast messaging is a later roadmap item.
+   ============================================================ */
+
+export const NOTE_MAX_CHARS = 1000;
+
+/** PostgREST "function not found" (PGRST202) or Postgres 42883. */
+function isMissingFunction(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  if (err.code === "PGRST202" || err.code === "42883") return true;
+  const m = (err.message ?? "").toLowerCase();
+  return m.includes("could not find the function") || m.includes("does not exist");
+}
+
+export async function sendShowNote(input: {
+  showId: ID;
+  showTitle: string | null;
+  recipientId: ID;
+  senderName: string;
+  subject: string;
+  message: string;
+}): Promise<{ replyTo: boolean }> {
+  const message = input.message.trim();
+  const subject = input.subject.trim();
+  if (!message) throw new Error("Write something first.");
+  if (message.length > NOTE_MAX_CHARS) {
+    throw new Error(`Notes are limited to ${NOTE_MAX_CHARS} characters.`);
+  }
+  const title = subject
+    ? `Note from ${input.senderName}: ${subject}`
+    : `Note from ${input.senderName}`;
+
+  if (isSupabaseConfigured) {
+    const supabase = getSupabase();
+    const { error } = await supabase.rpc("send_show_note", {
+      p_show_id: input.showId,
+      p_recipient_id: input.recipientId,
+      p_title: title,
+      p_body: message,
+    });
+    if (!error) return { replyTo: true };
+    if (!isMissingFunction(error)) throw new Error(error.message);
+
+    // Migration 026 not pasted yet — the relationship-checked
+    // create_notification (012) still delivers in-app + email (untagged
+    // rows always email), just without Reply-To.
+    const { error: fallbackError } = await supabase.rpc("create_notification", {
+      p_recipient_id: input.recipientId,
+      p_show_id: input.showId,
+      p_type: "system",
+      p_title: title,
+      p_body: message,
+      p_show_title: input.showTitle,
+      p_link_url: `/shows/${input.showId}/hub`,
+    });
+    if (fallbackError) throw new Error(fallbackError.message);
+    console.warn("send_show_note RPC missing (paste migration 026) — sent via create_notification without Reply-To.");
+    return { replyTo: false };
+  }
+  await delay(400);
+  return { replyTo: true };
 }
 
 /* ============================================================

@@ -33,7 +33,31 @@ type NotificationRecord = {
    * 'in_app' (never emailed) | null (always emailed).
    */
   category?: string | null;
+  /**
+   * Outbound Reply-To (migration 026) — set by send_show_note to the
+   * sender's account email so the recipient can answer a hub note by
+   * hitting Reply. NULL/absent on every other writer = no Reply-To header.
+   */
+  reply_to?: string | null;
 };
+
+/** Escape user-authored text before it lands in the HTML body. Notification
+ *  bodies are plain text (hub notes, announcement excerpts, reminders) —
+ *  never markup — so escaping is always correct, and it stops a note like
+ *  "<script>" from rendering as HTML in a mail client. */
+function esc(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Plain text → safe HTML with line breaks preserved (hub notes are
+ *  multi-line). */
+function bodyHtml(text: string): string {
+  return esc(text).replace(/\r?\n/g, "<br>");
+}
 
 // ── Notification preferences (migration 012) ──
 // profiles.notification_prefs is a jsonb of per-category EMAIL toggles:
@@ -75,9 +99,10 @@ function emailHtml(n: NotificationRecord): string {
   <head><meta charset="utf-8"></head>
   <body style="margin: 0;">
   <div style="font-family: Georgia, serif; max-width: 560px; margin: 0 auto; padding: 24px;">
-    <h1 style="color: #3d2645; font-size: 22px; margin-bottom: 4px;">${n.title}</h1>
-    ${n.show_title ? `<p style="color: #8a7968; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; margin-top: 0;">${n.show_title}</p>` : ""}
-    <p style="color: #2b2b2b; font-size: 16px; line-height: 1.5;">${n.body}</p>
+    <h1 style="color: #3d2645; font-size: 22px; margin-bottom: 4px;">${esc(n.title)}</h1>
+    ${n.show_title ? `<p style="color: #8a7968; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; margin-top: 0;">${esc(n.show_title)}</p>` : ""}
+    <p style="color: #2b2b2b; font-size: 16px; line-height: 1.5;">${bodyHtml(n.body)}</p>
+    ${n.reply_to ? `<p style="color: #8a7968; font-size: 13px;">Reply to this email to answer them directly.</p>` : ""}
     <a href="${link}" style="display: inline-block; margin-top: 16px; background: #c9a227; color: #2b2030; text-decoration: none; padding: 10px 20px; border-radius: 10px; font-family: Helvetica, Arial, sans-serif; font-weight: 600; font-size: 14px;">
       View in Overture
     </a>
@@ -181,6 +206,9 @@ Deno.serve(async (req) => {
           ? `${notification.title} — ${notification.show_title}`
           : notification.title,
         html: emailHtml(notification),
+        // Hub notes (migration 026): Reply goes to the sender, not the
+        // no-reply notifications address. Omitted entirely when unset.
+        ...(notification.reply_to ? { reply_to: notification.reply_to } : {}),
       }),
     });
 

@@ -27,7 +27,7 @@ findings (3), Fiddler population findings (2), carried infrastructure. Status mo
 | 13 | Show creation checklist order: team BEFORE roles | "Define who you have, add who you need." Reorder checklist + setup sections. |
 | 14 | Volunteer needs: multiple roles per date/event | Group shifts under an event (Set build Saturday → carpentry/painters/misc). Schema addition likely (019 or 020). |
 | 15 | Hub: contacts/People more prominent | Reorder sections; People/Who-to-Contact above or beside schedule. |
-| 16 | Who-to-Contact edit modal is crowded | UX cleanup. |
+| 16 | ✅ 2026-10-13 (with #30) — Who-to-Contact edit modal is crowded | One entry per card: For what · Who (team-member select or "Someone else") · Phone · Email · How; add/remove entries. |
 | 17 | ✅ 2026-10-13 — Rehearsal add/edit: surface conflicts (via #29) | Show known cast conflicts (signup_conflicts) + existing absences for the chosen date while scheduling. |
 | 18 | Declined offers vanish from history when refilled | From population run: refill forces declined→withdrawn; tracker loses the decline. Keep history (status or audit trail). |
 | 19 | ✅ 2026-10-13 — resolved via supplemental calls (the intentional UI path) | Adding a cast member after publish works via API; make the UI path intentional (ties into #12). |
@@ -62,11 +62,11 @@ findings (3), Fiddler population findings (2), carried infrastructure. Status mo
 | # | Item | Notes |
 |---|---|---|
 | 29 | Hub "My conflicts" (living cast conflict list) + conflict-aware scheduling (absorbs #17) | ✅ 2026-10-13 (migration 025). Cast add/remove date ranges on the Hub; union with audition conflicts feeds Conflict Calendar + rehearsal counts; "N people have conflicts that day" in the add-rehearsal modal. |
-| 30 | Who to Contact rows carry real contact info | Team enters shareable phone/email per routing row; tappable inline. |
-| 31 | People section rebuilt: team first, prominent cards; cast as compact headshot grid, principals above ensemble | Kills the right-side whitespace. |
-| 32 | Contact flow rethink ("HOLY SHIT YES") | Mobile: tel:/sms: natural taps. Desktop: copy-to-clipboard. NEW "Send a note" to any team member → in-app notification + email via Resend (reply-to sender). Seed of per-show messaging. |
-| 33 | Resources: files AND links | "Add a link" (Drive/YouTube/docs) beside upload; link icon + title; storage stays external. Small migration (show_files.url). |
-| 34 | Hub header: theatre name, key dates, poster | Hub reads as this show's home at a glance. |
+| 30 | ✅ 2026-10-13 — Who to Contact rows carry real contact info | `show_comm_norms` items gain optional `phone`/`email`/`userId` (jsonb, no DDL); rows render ContactActions inline. Team-typed only — never pulled from profiles. |
+| 31 | ✅ 2026-10-13 — People section rebuilt: team first, prominent cards; cast as compact headshot grid, principals above ensemble | Team 2-col cards (headshot, profile link, role, ContactActions) → Who to Contact → Cast grid 2/3/4 cols: Principals → Featured roles → one pot per ensemble role; Invited/Joined chips kept. |
+| 32 | ✅ 2026-10-13 (migration 026 + edge fn redeploy) — Contact flow rethink ("HOLY SHIT YES") | `ContactActions` (touch: Call/Text/Email taps · desktop: text + Copy + mailto ghost) + `SendNoteModal` → `send_show_note` RPC (category `messages`, Reply-To sender) with create_notification fallback pre-paste; 30s per-recipient cooldown; team-only recipients in v1. |
+| 33 | ✅ 2026-10-13 (migration 026) — Resources: files AND links | "Add a link" beside Upload; `show_files.url` + nullable `storage_path` + one-of CHECK; link rows open in a new tab, team-deletable; fails LOUD pre-paste; mock demos links on show-1. |
+| 34 | ✅ 2026-10-13 — Hub header: theatre name, key dates, poster | `HubHeader`: title + status badge, theatre → public page, run dates, next rehearsal, poster thumbnail. |
 
 ## New candidates (found during P1, untriaged)
 

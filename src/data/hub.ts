@@ -10,6 +10,7 @@ import type {
   RehearsalAbsence,
   Announcement,
   CommNormItem,
+  ShowFile,
 } from "@/types";
 
 /** A YYYY-MM-DD date string n days from today (local). */
@@ -160,12 +161,40 @@ export const memberConflicts: MockMemberConflict[] = [
 
 export const commNorms: Record<string, CommNormItem[]> = {
   "show-1": [
-    { topic: "Running late to rehearsal", contact: "Tom Briggs (SM)", method: "Text (951) 555-0102" },
-    { topic: "Schedule conflicts", contact: "Tom Briggs (SM)", method: "Report in the hub, then text if urgent" },
-    { topic: "Costumes & fittings", contact: "Angela Davis", method: "Email angela.davis@nctmail.org" },
-    { topic: "Music questions", contact: "Marcus Webb (MD)", method: "Email marcus.webb@nctmail.org" },
+    { topic: "Running late to rehearsal", contact: "Tom Briggs (SM)", method: "Text first", phone: "(951) 555-0102", userId: "user-team-2" },
+    { topic: "Schedule conflicts", contact: "Tom Briggs (SM)", method: "Report in the hub, then text if urgent", phone: "(951) 555-0102", userId: "user-team-2" },
+    { topic: "Costumes & fittings", contact: "Angela Davis", method: "Email", email: "angela.davis@nctmail.org", userId: "user-team-3" },
+    { topic: "Music questions", contact: "Marcus Webb (MD)", method: "Email", email: "marcus.webb@nctmail.org", userId: "user-team-5" },
   ],
 };
+
+/** Mock mirror of link rows in `show_files` (migration 026 — `url` set,
+ *  `storage_path` null). Uploads stay cloud-only in the demo; links work
+ *  end to end. Mutated in place by hub.ts in mock mode. */
+export const showLinks: ShowFile[] = [
+  {
+    id: "link-1",
+    showId: "show-1",
+    storagePath: null,
+    url: "https://drive.google.com/drive/folders/into-the-woods-rehearsal-tracks",
+    label: "Rehearsal tracks (Google Drive)",
+    category: "music",
+    sizeBytes: null,
+    uploadedBy: "user-team-5",
+    createdAt: isoAgo(50),
+  },
+  {
+    id: "link-2",
+    showId: "show-1",
+    storagePath: null,
+    url: "https://docs.google.com/document/d/into-the-woods-contact-sheet",
+    label: "Company contact sheet",
+    category: "form",
+    sizeBytes: null,
+    uploadedBy: "user-team-2",
+    createdAt: isoAgo(40),
+  },
+];
 
 /* ── Volunteers — dual-path mock data (show-1) ── */
 

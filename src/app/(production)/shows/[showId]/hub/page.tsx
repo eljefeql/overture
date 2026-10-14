@@ -21,6 +21,8 @@ import {
   uploadShowFile,
   deleteShowFile,
   getShowFileUrl,
+  addShowLink,
+  normalizeLinkUrl,
   updateCommNorms,
   getVolunteerNeeds,
   createVolunteerNeed,
@@ -63,6 +65,9 @@ import {
   Markdown,
 } from "@/components/ui";
 import { useToast } from "@/components/ui/Toast";
+import { ContactActions } from "@/components/hub/ContactActions";
+import { SendNoteModal, type NoteRecipient } from "@/components/hub/SendNoteModal";
+import { SHOW_STATUS_LABELS, SHOW_STATUS_BADGE } from "@/lib/constants";
 import { formatDate, formatTime, formatTeamRole, timeAgo } from "@/lib/utils";
 import {
   Calendar,
@@ -78,7 +83,6 @@ import {
   UsersThree,
   Warning,
   Envelope,
-  Phone,
   ChatCircleText,
   FolderOpen,
   FilePdf,
@@ -93,6 +97,9 @@ import {
   MaskHappy,
   HandHeart,
   LinkSimple,
+  ArrowSquareOut,
+  Buildings,
+  Ticket,
   CheckCircle,
   CaretDown,
   CaretUp,
@@ -107,6 +114,7 @@ import type {
   Rehearsal,
   CalledGroup,
   ShowFile,
+  ShowTeamMember,
   CommNormItem,
   VolunteerNeed,
   ConflictRange,
@@ -218,19 +226,10 @@ export default function ShowHubPage() {
     );
   }
 
-  const { show } = data;
-
   return (
     <div className="max-w-3xl mx-auto px-6 py-8">
-      {/* ── Header ── */}
-      <div className="mb-6 animate-fade-up">
-        <h1 className="text-3xl font-display text-curtain-900 mb-1">
-          {show.title}
-        </h1>
-        <p className="text-sm text-clay-500">
-          Show Hub — everything the company needs, in one place.
-        </p>
-      </div>
+      {/* ── Header (QC #34) — this show's home at a glance ── */}
+      <HubHeader data={data} />
 
       <div className="flex flex-col gap-8">
         <NextCallSection data={data} userId={user.id} userName={user.displayName} showId={showId} />
@@ -243,7 +242,13 @@ export default function ShowHubPage() {
         />
         <ScheduleSection data={data} userId={user.id} isTeam={isTeam} showId={showId} />
         <MyConflictsSection data={data} userId={user.id} showId={showId} />
-        <PeopleSection data={data} isTeam={isTeam} showId={showId} />
+        <PeopleSection
+          data={data}
+          isTeam={isTeam}
+          showId={showId}
+          userId={user.id}
+          userName={user.displayName}
+        />
         <ResourcesSection
           files={files ?? []}
           isTeam={isTeam}
@@ -263,6 +268,73 @@ export default function ShowHubPage() {
           controls.
         </p>
       )}
+    </div>
+  );
+}
+
+/* ============================================================
+   0. Header (QC #34) — theatre (→ public page), status, key
+   dates, next rehearsal, poster thumbnail. Compact + scannable.
+   ============================================================ */
+
+function HubHeader({ data }: { data: HubData }) {
+  const show = data.show!;
+  const [now] = useState(() => Date.now());
+  const nextRehearsal = data.rehearsals.find(
+    (r) => new Date(r.endTime).getTime() >= now
+  );
+  const runDates =
+    show.showOpen && show.showClose
+      ? show.showOpen === show.showClose
+        ? formatDate(show.showOpen)
+        : `${formatDate(show.showOpen)} – ${formatDate(show.showClose)}`
+      : show.showOpen
+        ? `Opens ${formatDate(show.showOpen)}`
+        : null;
+
+  return (
+    <div className="mb-6 animate-fade-up">
+      <div className="flex items-start gap-4">
+        {show.posterUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={show.posterUrl}
+            alt={`${show.title} poster`}
+            className="w-16 h-24 sm:w-20 sm:h-[120px] rounded-xl object-cover flex-shrink-0 shadow-sm"
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h1 className="text-3xl font-display text-curtain-900">{show.title}</h1>
+            <Badge variant={SHOW_STATUS_BADGE[show.status]} size="sm">
+              {SHOW_STATUS_LABELS[show.status]}
+            </Badge>
+          </div>
+          <Link
+            href={`/theatres/${show.orgId}`}
+            className="inline-flex items-center gap-1.5 text-sm text-curtain-700 hover:text-curtain-900 transition mt-1"
+            title="View the theatre's public page"
+          >
+            <Buildings className="w-4 h-4 text-stage-500" weight="duotone" />
+            {show.orgName}
+          </Link>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-clay-500">
+            {runDates && (
+              <span className="inline-flex items-center gap-1.5">
+                <Ticket className="w-4 h-4 text-stage-500" weight="duotone" />
+                {show.showClose && show.showOpen !== show.showClose ? "Runs " : ""}
+                {runDates}
+              </span>
+            )}
+            <span className="inline-flex items-center gap-1.5">
+              <Calendar className="w-4 h-4 text-stage-500" weight="duotone" />
+              {nextRehearsal
+                ? `Next rehearsal ${formatDate(nextRehearsal.date)} · ${formatTime(nextRehearsal.startTime)}`
+                : "No upcoming rehearsals scheduled"}
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1522,21 +1594,72 @@ function PeopleSection({
   data,
   isTeam,
   showId,
+  userId,
+  userName,
 }: {
   data: HubData;
   isTeam: boolean;
   showId: string;
+  userId: ID;
+  userName: string;
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [normsOpen, setNormsOpen] = useState(false);
-  const [normsDraft, setNormsDraft] = useState<CommNormItem[]>([]);
+  // Draft-only `other` flag: "Someone else…" picked in the Who select, so
+  // the free-text name field stays open even while the name is still empty.
+  type NormDraft = CommNormItem & { other?: boolean };
+  const [normsDraft, setNormsDraft] = useState<NormDraft[]>([]);
+
+  // ── Send a note (QC #32) — recipient + 30s per-person cooldown ──
+  const [noteTo, setNoteTo] = useState<NoteRecipient | null>(null);
+  const [cooldownIds, setCooldownIds] = useState<Set<ID>>(() => new Set());
+  const startCooldown = (id: ID) => {
+    setCooldownIds((prev) => new Set(prev).add(id));
+    setTimeout(() => {
+      setCooldownIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }, 30_000);
+  };
+
+  // Team members with accounts (guests have a `guest-` placeholder id) —
+  // the only valid note recipients in v1. Never yourself.
+  const noteableTeam = useMemo(
+    () =>
+      new Map(
+        data.team
+          .filter((t) => !t.userId.startsWith("guest-") && t.userId !== userId)
+          .map((t) => [t.userId, t])
+      ),
+    [data.team, userId]
+  );
+  const noteFor = (t: ShowTeamMember | undefined) =>
+    t && noteableTeam.has(t.userId)
+      ? () =>
+          setNoteTo({
+            userId: t.userId,
+            name: t.userName,
+            detail: formatTeamRole(t.role),
+          })
+      : undefined;
 
   const normsMutation = useMutation({
     mutationFn: () =>
       updateCommNorms(
         showId,
-        normsDraft.filter((n) => n.topic.trim() && n.contact.trim())
+        normsDraft
+          .filter((n) => n.topic.trim() && n.contact.trim())
+          .map((n) => ({
+            topic: n.topic.trim(),
+            contact: n.contact.trim(),
+            method: (n.method ?? "").trim(),
+            phone: (n.phone ?? "").trim() || undefined,
+            email: (n.email ?? "").trim() || undefined,
+            userId: n.userId ?? undefined,
+          }))
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["hub", showId] });
@@ -1546,50 +1669,210 @@ function PeopleSection({
     onError: (err: Error) => toast("error", err.message),
   });
 
+  const EMPTY_NORM: NormDraft = { topic: "", contact: "", method: "", phone: "", email: "", userId: null };
   const openNorms = () => {
     setNormsDraft(
       data.commNorms.length > 0
-        ? data.commNorms.map((n) => ({ ...n }))
-        : [{ topic: "", contact: "", method: "" }]
+        ? data.commNorms.map((n) => ({
+            ...EMPTY_NORM,
+            ...n,
+            // Saved rows that aren't linked to a team member = "someone else".
+            other: !n.userId && !!n.contact,
+          }))
+        : [{ ...EMPTY_NORM }]
     );
     setNormsOpen(true);
   };
+  const updateNorm = (i: number, patch: Partial<NormDraft>) =>
+    setNormsDraft((prev) => prev.map((n, j) => (j === i ? { ...n, ...patch } : n)));
 
   // Group multiple accepted roles per person. Cast members added by email
   // (precast bulk add) have no account yet — actorId is null until they sign
   // up and claim_cast_assignments links them. They render as "Invited" (no
   // profile link) so the SM can see who still needs a nudge.
-  const castPeople = useMemo(() => {
-    const byActor = new Map<
-      string,
-      { name: string; roles: string[]; joined: boolean; invited: boolean; email: string | null }
-    >();
+  // Grouping (QC #31): Principals (lead/supporting) → Featured roles
+  // (featured_ensemble — named parts, one flat grid) → one pot per
+  // `ensemble` role ("Villagers of Anatevka (8)").
+  type CastPerson = {
+    id: string;
+    name: string;
+    avatarUrl: string | null;
+    roles: string[];
+    joined: boolean;
+    invited: boolean;
+    email: string | null;
+    tier: "principal" | "featured" | "ensemble";
+    /** Ensemble pot name(s) this person belongs to, for grouping. */
+    pots: string[];
+  };
+  const { principals, featured, ensemblePots } = useMemo(() => {
+    const roleTypeById = new Map(data.roles.map((r) => [r.id, r.roleType]));
+    const byActor = new Map<string, CastPerson>();
     for (const c of data.cast) {
       const key = c.actorId ?? `guest-${c.id}`;
       const entry =
         byActor.get(key) ?? {
+          id: key,
           name: c.actorName,
+          avatarUrl: c.actorAvatarUrl ?? null,
           roles: [],
           joined: !!c.actorId,
           invited: !!c.invitedAt,
           email: c.guestEmail ?? null,
+          tier: "ensemble" as const,
+          pots: [],
         };
+      const roleType = roleTypeById.get(c.roleId) ?? "ensemble";
       entry.roles.push(
         c.assignmentType === "primary"
           ? c.roleName
           : `${c.roleName} (${c.assignmentType})`
       );
+      if (roleType === "lead" || roleType === "supporting") entry.tier = "principal";
+      else if (roleType === "featured_ensemble" && entry.tier !== "principal")
+        entry.tier = "featured";
+      else if (!entry.pots.includes(c.roleName)) entry.pots.push(c.roleName);
       byActor.set(key, entry);
     }
-    return [...byActor.entries()].map(([id, v]) => ({ id, ...v }));
-  }, [data.cast]);
-  const unjoinedCount = castPeople.filter((p) => !p.joined).length;
+    const all = [...byActor.values()];
+    const principals = all.filter((p) => p.tier === "principal");
+    const featured = all.filter((p) => p.tier === "featured");
+    // Ensemble pots keep the roles' sort order (data.roles order).
+    const pots = new Map<string, CastPerson[]>();
+    for (const r of data.roles) {
+      if (r.roleType !== "ensemble") continue;
+      const members = all.filter((p) => p.tier === "ensemble" && p.pots.includes(r.name));
+      if (members.length > 0) pots.set(r.name, members);
+    }
+    // Anyone left (ensemble-tier but their role isn't in data.roles) still shows.
+    const placed = new Set([...pots.values()].flat().map((p) => p.id));
+    const leftovers = all.filter((p) => p.tier === "ensemble" && !placed.has(p.id));
+    if (leftovers.length > 0) pots.set("Ensemble", [...(pots.get("Ensemble") ?? []), ...leftovers]);
+    return { principals, featured, ensemblePots: [...pots.entries()] };
+  }, [data.cast, data.roles]);
+  const castCount =
+    principals.length + featured.length + ensemblePots.reduce((n, [, m]) => n + m.length, 0);
+  const unjoinedCount = [principals, featured, ...ensemblePots.map(([, m]) => m)]
+    .flat()
+    .filter((p) => !p.joined).length;
+  const groupCount = (principals.length ? 1 : 0) + (featured.length ? 1 : 0) + ensemblePots.length;
+
+  const renderCastTile = (p: CastPerson) => {
+    const inner = (
+      <>
+        <Avatar name={p.name} imageUrl={p.avatarUrl} size="lg" className="mb-2" />
+        <p className="text-sm font-semibold text-curtain-900 truncate w-full">{p.name}</p>
+        <p className="text-xs text-clay-500 truncate w-full">{p.roles.join(" · ")}</p>
+        {!p.joined && (
+          <div className="mt-1.5">
+            <Badge variant={p.invited ? "gold" : "muted"} size="sm">
+              {p.invited ? "Invited" : "Not invited yet"}
+            </Badge>
+          </div>
+        )}
+        {!p.joined && isTeam && p.email && (
+          <p className="text-[10px] text-clay-400 truncate w-full mt-0.5">{p.email}</p>
+        )}
+      </>
+    );
+    const cls = "flex flex-col items-center text-center min-w-0 p-2 rounded-xl";
+    return p.joined ? (
+      <Link
+        key={p.id}
+        href={`/actors/${p.id}`}
+        className={`${cls} hover:bg-cream-50 transition`}
+        title={`View ${p.name}'s profile`}
+      >
+        {inner}
+      </Link>
+    ) : (
+      <div key={p.id} className={cls}>
+        {inner}
+      </div>
+    );
+  };
+
+  const castGrid = (people: CastPerson[]) => (
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+      {people.map(renderCastTile)}
+    </div>
+  );
+
+  // Routing-row → team member (for "Send a note"). Prefers the explicit
+  // userId saved from the edit modal; falls back to a name match so rows
+  // saved before QC #30 still light up.
+  const teamForNorm = (n: CommNormItem): ShowTeamMember | undefined => {
+    if (n.userId) return data.team.find((t) => t.userId === n.userId);
+    const needle = n.contact.toLowerCase();
+    return data.team.find(
+      (t) => t.userName && needle.includes(t.userName.toLowerCase())
+    );
+  };
+
+  const teamOptions = data.team.filter((t) => t.userName);
 
   return (
     <section>
       <SectionHeader>People</SectionHeader>
       <div className="flex flex-col gap-3">
-        {/* Comm norms — who to contact for what */}
+        {/* ── Production team — first, prominent (QC #31) ── */}
+        <Card variant="elevated" padding="standard">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <UsersThree className="w-5 h-5 text-stage-500" weight="duotone" />
+              <CardTitle>Production Team ({data.team.length})</CardTitle>
+            </div>
+          </CardHeader>
+          {data.team.length === 0 ? (
+            <p className="text-sm text-clay-500">
+              The production team appears here as members are added on the show&apos;s setup page.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {data.team.map((t) => {
+                const isGuest = t.userId.startsWith("guest-");
+                const isMe = t.userId === userId;
+                return (
+                  <Card key={t.id} variant="flat" padding="compact">
+                    <div className="flex items-start gap-3">
+                      {isGuest ? (
+                        <Avatar name={t.userName} imageUrl={t.avatarUrl} size="md" />
+                      ) : (
+                        <Link href={`/actors/${t.userId}`} title={`View ${t.userName}'s profile`}>
+                          <Avatar name={t.userName} imageUrl={t.avatarUrl} size="md" />
+                        </Link>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        {isGuest ? (
+                          <p className="text-sm font-semibold text-curtain-900 truncate">{t.userName}</p>
+                        ) : (
+                          <Link
+                            href={`/actors/${t.userId}`}
+                            className="text-sm font-semibold text-curtain-900 truncate block hover:text-curtain-700 transition"
+                            title={`View ${t.userName}'s profile`}
+                          >
+                            {t.userName}
+                            {isMe && <span className="text-clay-400 font-normal"> (you)</span>}
+                          </Link>
+                        )}
+                        <p className="text-xs text-clay-500 mb-2">{formatTeamRole(t.role)}</p>
+                        <ContactActions
+                          name={t.userName}
+                          phone={t.phone}
+                          email={t.email}
+                          onNote={noteFor(t)}
+                          noteDisabled={cooldownIds.has(t.userId)}
+                        />
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+
+        {/* ── Who to contact — routing rows with real contact info (QC #30) ── */}
         <Card variant="elevated" padding="standard">
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -1608,71 +1891,80 @@ function PeopleSection({
             )}
           </CardHeader>
           {data.commNorms.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              {data.commNorms.map((n, i) => (
-                <div
-                  key={i}
-                  className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-0.5 py-1.5 border-b border-cream-100 last:border-0"
-                >
-                  <span className="text-sm font-medium text-curtain-900">{n.topic}</span>
-                  <span className="text-xs text-clay-500">
-                    {n.contact}
-                    {n.method ? ` · ${n.method}` : ""}
-                  </span>
-                </div>
-              ))}
+            <div className="flex flex-col">
+              {data.commNorms.map((n, i) => {
+                const member = teamForNorm(n);
+                return (
+                  <div
+                    key={i}
+                    className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 py-3 border-b border-cream-100 last:border-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-curtain-900">{n.topic}</p>
+                      <p className="text-xs text-clay-500">
+                        {n.contact}
+                        {n.method ? ` · ${n.method}` : ""}
+                      </p>
+                    </div>
+                    <ContactActions
+                      name={n.contact}
+                      phone={n.phone}
+                      email={n.email}
+                      onNote={noteFor(member)}
+                      noteDisabled={member ? cooldownIds.has(member.userId) : false}
+                      className="sm:items-end sm:text-right flex-shrink-0"
+                    />
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <p className="text-sm text-clay-500">
               {isTeam
-                ? "Tell the company who to reach for what — running late, costumes, music questions."
+                ? "Tell the company who to reach for what — running late, costumes, music questions — with a number or email they can actually use."
                 : "The team hasn't set contact routing yet."}
             </p>
           )}
         </Card>
 
-        {/* Cast */}
+        {/* ── Cast — compact headshot grid, principals above the ensemble (QC #31) ── */}
         <Card variant="elevated" padding="standard">
           <CardHeader>
             <div className="flex items-center gap-2">
               <MaskHappy className="w-5 h-5 text-stage-500" weight="duotone" />
-              <CardTitle>Cast ({castPeople.length})</CardTitle>
+              <CardTitle>Cast ({castCount})</CardTitle>
             </div>
           </CardHeader>
-          {castPeople.length > 0 ? (
-            <div className="flex flex-col gap-3">
-              {castPeople.map((p) =>
-                p.joined ? (
-                  <Link
-                    key={p.id}
-                    href={`/actors/${p.id}`}
-                    className="flex items-center gap-3 -mx-1.5 px-1.5 py-0.5 rounded-xl hover:bg-cream-50 transition"
-                    title={`View ${p.name}'s profile`}
-                  >
-                    <Avatar name={p.name} size="sm" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-curtain-900 truncate">{p.name}</p>
-                      <p className="text-xs text-clay-500 truncate">{p.roles.join(" · ")}</p>
-                    </div>
-                  </Link>
-                ) : (
-                  // Added by email, hasn't created an account yet — no
-                  // profile to link to.
-                  <div key={p.id} className="flex items-center gap-3 -mx-1.5 px-1.5 py-0.5">
-                    <Avatar name={p.name} size="sm" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-curtain-900 truncate">{p.name}</p>
-                      <p className="text-xs text-clay-500 truncate">
-                        {p.roles.join(" · ")}
-                        {isTeam && p.email ? ` · ${p.email}` : ""}
-                      </p>
-                    </div>
-                    <Badge variant={p.invited ? "gold" : "muted"} size="sm">
-                      {p.invited ? "Invited" : "Not invited yet"}
-                    </Badge>
-                  </div>
-                )
+          {castCount > 0 ? (
+            <div className="flex flex-col gap-4">
+              {principals.length > 0 && (
+                <div>
+                  {groupCount > 1 && (
+                    <p className="text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-2">
+                      Principals
+                    </p>
+                  )}
+                  {castGrid(principals)}
+                </div>
               )}
+              {featured.length > 0 && (
+                <div>
+                  {groupCount > 1 && (
+                    <p className="text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-2">
+                      Featured roles
+                    </p>
+                  )}
+                  {castGrid(featured)}
+                </div>
+              )}
+              {ensemblePots.map(([potName, members]) => (
+                <div key={potName}>
+                  <p className="text-xs font-semibold text-curtain-700 tracking-wide uppercase mb-2">
+                    {potName} ({members.length})
+                  </p>
+                  {castGrid(members)}
+                </div>
+              ))}
               {unjoinedCount > 0 && (
                 <p className="text-[11px] text-clay-400 leading-snug">
                   {unjoinedCount === 1
@@ -1689,119 +1981,146 @@ function PeopleSection({
             </p>
           )}
         </Card>
-
-        {/* Team */}
-        <Card variant="elevated" padding="standard">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <UsersThree className="w-5 h-5 text-stage-500" weight="duotone" />
-              <CardTitle>Production Team ({data.team.length})</CardTitle>
-            </div>
-          </CardHeader>
-          <div className="flex flex-col gap-3">
-            {data.team.map((t) => (
-              <div key={t.id} className="flex items-center justify-between gap-3">
-                {/* Guests (no account) aren't linkable — their userId is a guest- placeholder */}
-                {t.userId.startsWith("guest-") ? (
-                  <div className="flex items-center gap-3 min-w-0">
-                    <Avatar name={t.userName} size="sm" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-curtain-900 truncate">{t.userName}</p>
-                      <p className="text-xs text-clay-500">{formatTeamRole(t.role)}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <Link
-                    href={`/actors/${t.userId}`}
-                    className="flex items-center gap-3 min-w-0 -mx-1.5 px-1.5 py-0.5 rounded-xl hover:bg-cream-50 transition"
-                    title={`View ${t.userName}'s profile`}
-                  >
-                    <Avatar name={t.userName} size="sm" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-curtain-900 truncate">{t.userName}</p>
-                      <p className="text-xs text-clay-500">{formatTeamRole(t.role)}</p>
-                    </div>
-                  </Link>
-                )}
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {t.email && (
-                    <a
-                      href={`mailto:${t.email}`}
-                      className="p-1.5 rounded-lg hover:bg-cream-50 transition"
-                      aria-label={`Email ${t.userName}`}
-                    >
-                      <Envelope className="w-4 h-4 text-stage-500" weight="duotone" />
-                    </a>
-                  )}
-                  {t.phone && (
-                    <a
-                      href={`tel:${t.phone}`}
-                      className="p-1.5 rounded-lg hover:bg-cream-50 transition"
-                      aria-label={`Call ${t.userName}`}
-                    >
-                      <Phone className="w-4 h-4 text-stage-500" weight="duotone" />
-                    </a>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
       </div>
 
-      {/* ── Edit comm norms modal ── */}
+      {/* ── Send a note modal (QC #32) ── */}
+      <SendNoteModal
+        open={!!noteTo}
+        onClose={() => setNoteTo(null)}
+        recipient={noteTo}
+        showId={showId}
+        showTitle={data.show?.title ?? null}
+        senderName={userName}
+        onSent={startCooldown}
+      />
+
+      {/* ── Edit comm norms modal — one entry per card (QC #16 + #30) ── */}
       <Modal open={normsOpen} onClose={() => setNormsOpen(false)} title="Who to Contact">
-        <div className="py-4 flex flex-col gap-3 max-h-[70vh] overflow-y-auto">
+        <div className="py-2 flex flex-col gap-4 max-h-[70vh] overflow-y-auto">
           <p className="text-sm text-clay-500">
-            Route questions before they become group texts — &quot;running late → text the
-            SM&quot;, &quot;costumes → email the designer&quot;.
+            Route questions before they become group texts. Share only the
+            number or email each person is happy to hand out — nothing is
+            pulled from anyone&apos;s profile.
           </p>
-          {normsDraft.map((n, i) => (
-            <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_auto] gap-2 items-start">
-              <Input
-                value={n.topic}
-                placeholder="Topic (e.g. Running late)"
-                onChange={(e) => {
-                  const next = [...normsDraft];
-                  next[i] = { ...n, topic: e.target.value };
-                  setNormsDraft(next);
-                }}
-              />
-              <Input
-                value={n.contact}
-                placeholder="Who (e.g. Tom Briggs, SM)"
-                onChange={(e) => {
-                  const next = [...normsDraft];
-                  next[i] = { ...n, contact: e.target.value };
-                  setNormsDraft(next);
-                }}
-              />
-              <Input
-                value={n.method}
-                placeholder="How (e.g. Text (951) 555-0102)"
-                onChange={(e) => {
-                  const next = [...normsDraft];
-                  next[i] = { ...n, method: e.target.value };
-                  setNormsDraft(next);
-                }}
-              />
-              <button
-                onClick={() => setNormsDraft(normsDraft.filter((_, j) => j !== i))}
-                className="text-clay-300 hover:text-ruby-500 transition p-2"
-                aria-label="Remove row"
-              >
-                <Trash className="w-4 h-4" weight="bold" />
-              </button>
-            </div>
-          ))}
+          {normsDraft.map((n, i) => {
+            const linked = n.userId ? teamOptions.find((t) => t.userId === n.userId) : undefined;
+            const selectValue = linked ? linked.userId : n.other ? "__other" : "";
+            return (
+              <Card key={i} variant="flat" padding="standard">
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <p className="text-xs font-semibold text-curtain-700 tracking-wide uppercase">
+                    Entry {i + 1}
+                  </p>
+                  <button
+                    onClick={() => setNormsDraft(normsDraft.filter((_, j) => j !== i))}
+                    className="text-clay-300 hover:text-ruby-500 transition p-1 -m-1"
+                    aria-label={`Remove entry ${i + 1}`}
+                  >
+                    <Trash className="w-4 h-4" weight="bold" />
+                  </button>
+                </div>
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+                      For what *
+                    </label>
+                    <Input
+                      value={n.topic}
+                      placeholder='e.g. "Running late to rehearsal"'
+                      onChange={(e) => updateNorm(i, { topic: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+                      Who *
+                    </label>
+                    <select
+                      value={selectValue}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === "__other") {
+                          updateNorm(i, { userId: null, other: true, contact: linked ? "" : n.contact });
+                        } else if (v === "") {
+                          updateNorm(i, { userId: null, other: false, contact: "" });
+                        } else {
+                          const t = teamOptions.find((x) => x.userId === v);
+                          if (t) {
+                            updateNorm(i, {
+                              // Guest team members (no account) get a name only —
+                              // no userId, so no "Send a note".
+                              userId: t.userId.startsWith("guest-") ? null : t.userId,
+                              other: false,
+                              contact: `${t.userName} (${formatTeamRole(t.role)})`,
+                            });
+                          }
+                        }
+                      }}
+                      className="w-full px-3 py-2.5 text-sm rounded-xl border border-cream-300 bg-cream-50 focus:outline-none focus:ring-2 focus:ring-curtain-200 text-curtain-900"
+                    >
+                      <option value="">Pick a team member…</option>
+                      {teamOptions.map((t) => (
+                        <option key={t.id} value={t.userId}>
+                          {t.userName} — {formatTeamRole(t.role)}
+                        </option>
+                      ))}
+                      <option value="__other">Someone else…</option>
+                    </select>
+                    {selectValue === "__other" && (
+                      <div className="mt-2">
+                        <Input
+                          value={n.contact}
+                          placeholder='Name (e.g. "Dana at the box office")'
+                          onChange={(e) => updateNorm(i, { contact: e.target.value, userId: null, other: true })}
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+                        Phone
+                      </label>
+                      <Input
+                        type="tel"
+                        value={n.phone ?? ""}
+                        placeholder="(951) 555-0102"
+                        onChange={(e) => updateNorm(i, { phone: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+                        Email
+                      </label>
+                      <Input
+                        type="email"
+                        value={n.email ?? ""}
+                        placeholder="name@example.com"
+                        onChange={(e) => updateNorm(i, { email: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+                      How <span className="text-clay-400 normal-case font-normal">(optional)</span>
+                    </label>
+                    <Input
+                      value={n.method}
+                      placeholder='e.g. "Text first — email if it can wait"'
+                      onChange={(e) => updateNorm(i, { method: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
           <Button
             variant="ghost"
             size="sm"
             className="self-start"
-            onClick={() => setNormsDraft([...normsDraft, { topic: "", contact: "", method: "" }])}
+            onClick={() => setNormsDraft([...normsDraft, { ...EMPTY_NORM }])}
             icon={<Plus className="w-4 h-4" weight="bold" />}
           >
-            Add a row
+            Add another
           </Button>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={() => setNormsOpen(false)}>
@@ -1836,28 +2155,47 @@ function ResourcesSection({
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkTitle, setLinkTitle] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
+
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: ["hubFiles", showId] });
 
   const uploadMutation = useMutation({
     mutationFn: (file: File) =>
       uploadShowFile(showId, file, file.name, null, userId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["hubFiles", showId] });
+      invalidate();
       toast("success", "File uploaded!");
+    },
+    onError: (err: Error) => toast("error", err.message),
+  });
+
+  const linkMutation = useMutation({
+    mutationFn: () => addShowLink({ showId, title: linkTitle, url: linkUrl, userId }),
+    onSuccess: () => {
+      invalidate();
+      toast("success", "Link added!");
+      setLinkOpen(false);
+      setLinkTitle("");
+      setLinkUrl("");
     },
     onError: (err: Error) => toast("error", err.message),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (file: ShowFile) => deleteShowFile(file),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["hubFiles", showId] });
-      toast("info", "File removed.");
+    onSuccess: (_d, file) => {
+      invalidate();
+      toast("info", file.url ? "Link removed." : "File removed.");
       setDeletingId(null);
     },
     onError: (err: Error) => toast("error", err.message),
   });
 
   const download = async (file: ShowFile) => {
+    if (!file.storagePath) return;
     try {
       const url = await getShowFileUrl(file.storagePath);
       window.open(url, "_blank", "noopener,noreferrer");
@@ -1866,116 +2204,225 @@ function ResourcesSection({
     }
   };
 
+  const hostOf = (url: string) => {
+    try {
+      return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+      return url;
+    }
+  };
+
+  const linkUrlValid = normalizeLinkUrl(linkUrl) !== null;
+
+  const deleteControls = (f: ShowFile) =>
+    isTeam &&
+    (deletingId === f.id ? (
+      <div className="flex items-center gap-1">
+        <Button
+          size="sm"
+          variant="danger"
+          onClick={() => deleteMutation.mutate(f)}
+          loading={deleteMutation.isPending}
+        >
+          Delete
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setDeletingId(null)}>
+          Keep
+        </Button>
+      </div>
+    ) : (
+      <button
+        onClick={() => setDeletingId(f.id)}
+        className="p-1.5 rounded-lg hover:bg-cream-50 transition"
+        aria-label={`Delete ${f.label}`}
+      >
+        <Trash className="w-4 h-4 text-clay-300 hover:text-ruby-500" weight="bold" />
+      </button>
+    ));
+
   return (
     <section>
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between gap-2 mb-3">
         <SectionHeader className="mb-0">Resources</SectionHeader>
-        {isTeam && isSupabaseConfigured && (
-          <>
-            <input
-              ref={inputRef}
-              type="file"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) uploadMutation.mutate(f);
-                e.target.value = "";
-              }}
-            />
+        {isTeam && (
+          <div className="flex items-center gap-1">
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => inputRef.current?.click()}
-              loading={uploadMutation.isPending}
-              icon={<UploadSimple className="w-4 h-4" weight="bold" />}
+              onClick={() => setLinkOpen(true)}
+              icon={<LinkSimple className="w-4 h-4" weight="bold" />}
             >
-              Upload
+              Add a link
             </Button>
-          </>
+            {isSupabaseConfigured && (
+              <>
+                <input
+                  ref={inputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) uploadMutation.mutate(f);
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => inputRef.current?.click()}
+                  loading={uploadMutation.isPending}
+                  icon={<UploadSimple className="w-4 h-4" weight="bold" />}
+                >
+                  Upload
+                </Button>
+              </>
+            )}
+          </div>
         )}
       </div>
 
-      {!isSupabaseConfigured ? (
+      {files.length === 0 ? (
         <Card variant="flat" padding="standard">
           <div className="flex items-center gap-3">
-            <CloudArrowUp className="w-6 h-6 text-stage-500 flex-shrink-0" weight="duotone" />
+            {isSupabaseConfigured ? (
+              <FolderOpen className="w-6 h-6 text-stage-500 flex-shrink-0" weight="duotone" />
+            ) : (
+              <CloudArrowUp className="w-6 h-6 text-stage-500 flex-shrink-0" weight="duotone" />
+            )}
             <p className="text-sm text-clay-500">
-              File sharing — sides, tracks, run sheets — arrives with your
-              theatre&apos;s cloud setup. Uploads up to 10MB each.
-            </p>
-          </div>
-        </Card>
-      ) : files.length === 0 ? (
-        <Card variant="flat" padding="standard">
-          <div className="flex items-center gap-3">
-            <FolderOpen className="w-6 h-6 text-stage-500 flex-shrink-0" weight="duotone" />
-            <p className="text-sm text-clay-500">
-              {isTeam
-                ? "No files yet. Upload sides, rehearsal tracks, run sheets, or forms (up to 10MB each)."
-                : "No files yet. Anything the team shares — sides, tracks, forms — shows up here."}
+              {!isSupabaseConfigured
+                ? "Add links to Drive folders, YouTube, or docs. File uploads (sides, tracks, run sheets — up to 10MB each) arrive with your theatre's cloud setup."
+                : isTeam
+                  ? "Nothing here yet. Add a link (Drive, YouTube, a doc) or upload sides, rehearsal tracks, run sheets, or forms (up to 10MB each)."
+                  : "Nothing here yet. Anything the team shares — links, sides, tracks, forms — shows up here."}
             </p>
           </div>
         </Card>
       ) : (
         <Card variant="elevated" padding="standard">
           <div className="flex flex-col">
-            {files.map((f) => (
-              <div
-                key={f.id}
-                className="flex items-center justify-between gap-3 py-2.5 border-b border-cream-100 last:border-0"
-              >
-                <button
-                  onClick={() => download(f)}
-                  className="flex items-center gap-3 min-w-0 text-left hover:opacity-75 transition"
+            {files.map((f) =>
+              f.url ? (
+                // Link row (migration 026) — opens in a new tab.
+                <div
+                  key={f.id}
+                  className="flex items-center justify-between gap-3 py-2.5 border-b border-cream-100 last:border-0"
                 >
-                  {fileIcon(f.storagePath)}
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-curtain-900 truncate">{f.label}</p>
-                    <p className="text-xs text-clay-400">
-                      {formatBytes(f.sizeBytes)}
-                      {f.sizeBytes ? " · " : ""}
-                      {formatDate(f.createdAt)}
-                    </p>
+                  <a
+                    href={f.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 min-w-0 text-left hover:opacity-75 transition"
+                  >
+                    <LinkSimple className="w-5 h-5 text-stage-500 flex-shrink-0" weight="duotone" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-curtain-900 truncate">{f.label}</p>
+                      <p className="text-xs text-clay-400 truncate">
+                        {hostOf(f.url)} · {formatDate(f.createdAt)}
+                      </p>
+                    </div>
+                  </a>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <a
+                      href={f.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 rounded-lg hover:bg-cream-50 transition"
+                      aria-label={`Open ${f.label} in a new tab`}
+                    >
+                      <ArrowSquareOut className="w-4 h-4 text-stage-500" weight="duotone" />
+                    </a>
+                    {deleteControls(f)}
                   </div>
-                </button>
-                <div className="flex items-center gap-1 flex-shrink-0">
+                </div>
+              ) : (
+                // File row — unchanged.
+                <div
+                  key={f.id}
+                  className="flex items-center justify-between gap-3 py-2.5 border-b border-cream-100 last:border-0"
+                >
                   <button
                     onClick={() => download(f)}
-                    className="p-1.5 rounded-lg hover:bg-cream-50 transition"
-                    aria-label={`Download ${f.label}`}
+                    className="flex items-center gap-3 min-w-0 text-left hover:opacity-75 transition"
                   >
-                    <DownloadSimple className="w-4 h-4 text-stage-500" weight="duotone" />
+                    {fileIcon(f.storagePath ?? f.label)}
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-curtain-900 truncate">{f.label}</p>
+                      <p className="text-xs text-clay-400">
+                        {formatBytes(f.sizeBytes)}
+                        {f.sizeBytes ? " · " : ""}
+                        {formatDate(f.createdAt)}
+                      </p>
+                    </div>
                   </button>
-                  {isTeam &&
-                    (deletingId === f.id ? (
-                      <div className="flex items-center gap-1">
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          onClick={() => deleteMutation.mutate(f)}
-                          loading={deleteMutation.isPending}
-                        >
-                          Delete
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setDeletingId(null)}>
-                          Keep
-                        </Button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => setDeletingId(f.id)}
-                        className="p-1.5 rounded-lg hover:bg-cream-50 transition"
-                        aria-label={`Delete ${f.label}`}
-                      >
-                        <Trash className="w-4 h-4 text-clay-300 hover:text-ruby-500" weight="bold" />
-                      </button>
-                    ))}
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      onClick={() => download(f)}
+                      className="p-1.5 rounded-lg hover:bg-cream-50 transition"
+                      aria-label={`Download ${f.label}`}
+                    >
+                      <DownloadSimple className="w-4 h-4 text-stage-500" weight="duotone" />
+                    </button>
+                    {deleteControls(f)}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            )}
           </div>
+          {!isSupabaseConfigured && isTeam && (
+            <p className="text-[11px] text-clay-400 mt-3 flex items-center gap-1.5">
+              <CloudArrowUp className="w-4 h-4 text-stage-500 flex-shrink-0" weight="duotone" />
+              File uploads arrive with your theatre&apos;s cloud setup — links work now.
+            </p>
+          )}
         </Card>
       )}
+
+      {/* ── Add a link modal (team) ── */}
+      <Modal open={linkOpen} onClose={() => setLinkOpen(false)} title="Add a Link">
+        <div className="py-2 flex flex-col gap-4">
+          <p className="text-sm text-clay-500">
+            A Drive folder, a YouTube playlist, a Google Doc — anything with a
+            web address. It stays where it lives; the hub just points to it.
+          </p>
+          <div>
+            <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+              Link *
+            </label>
+            <Input
+              type="url"
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              placeholder="https://drive.google.com/…"
+              autoFocus
+              error={linkUrl.trim() && !linkUrlValid ? "Needs to be a web address starting with http:// or https://" : undefined}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+              Title
+            </label>
+            <Input
+              value={linkTitle}
+              onChange={(e) => setLinkTitle(e.target.value.slice(0, 120))}
+              placeholder='e.g. "Rehearsal tracks" (defaults to the address)'
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setLinkOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => linkMutation.mutate()}
+              disabled={!linkUrlValid}
+              loading={linkMutation.isPending}
+              icon={<LinkSimple className="w-4 h-4" weight="bold" />}
+            >
+              Add link
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </section>
   );
 }

@@ -152,7 +152,7 @@ const CREDIT_SELECT = "*, kudos(quote, profiles:author_id(display_name))";
 
 const SIGNUP_SELECT = "*, profiles:actor_id(display_name, avatar_url, pronouns)";
 const CALLBACK_SELECT = "*, show_roles:role_id(name), profiles:actor_id(display_name)";
-const CAST_SELECT = "*, show_roles:role_id(name), profiles:actor_id(display_name)";
+const CAST_SELECT = "*, show_roles:role_id(name), profiles:actor_id(display_name, avatar_url)";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function rowToSignup(r: any): AuditionSignup {
@@ -202,6 +202,7 @@ function rowToCastAssignment(r: any): CastAssignment {
     // null = invited-by-email guest, no account yet (migration 024).
     actorId: r.actor_id ?? null,
     actorName: r.profiles?.display_name ?? r.guest_name ?? "",
+    actorAvatarUrl: r.profiles?.avatar_url ?? null,
     assignmentType: r.assignment_type,
     status: r.status,
     sortOrder: r.sort_order,
@@ -386,7 +387,7 @@ const TEAM_ROLE_DEPARTMENT: Record<TeamRole, string> = {
 };
 
 const TEAM_SELECT =
-  "*, show_team_roles(role_title, department, sort_order), profiles:user_id(display_name, email, phone)";
+  "*, show_team_roles(role_title, department, sort_order), profiles:user_id(display_name, email, phone, avatar_url)";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function rowToTeamMember(r: any): ShowTeamMember {
@@ -402,6 +403,7 @@ function rowToTeamMember(r: any): ShowTeamMember {
     canEvaluate: r.can_evaluate,
     email: r.profiles?.email ?? r.guest_email ?? null,
     phone: r.profiles?.phone ?? null,
+    avatarUrl: r.profiles?.avatar_url ?? null,
   };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */

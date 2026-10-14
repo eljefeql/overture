@@ -63,6 +63,11 @@ const PREF_ROWS: PrefRow[] = [
     label: "Offers & callbacks",
     description: "Cast offers, callback invitations, and responses.",
   },
+  {
+    key: "messages",
+    label: "Notes from your company",
+    description: "Direct notes sent to you from a show's hub.",
+  },
 ];
 
 function Switch({

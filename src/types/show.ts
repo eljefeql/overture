@@ -190,6 +190,9 @@ export type ShowTeamMember = {
   canEvaluate: boolean;
   email: string | null;
   phone: string | null;
+  /** Headshot (profiles.avatar_url) — hub team cards. Optional: mock rows
+   *  and older readers don't carry it. */
+  avatarUrl?: string | null;
 };
 
 export type AuditionGroup = {
@@ -306,6 +309,8 @@ export type CastAssignment = {
    *  Signing up with the invited email auto-links (claim_cast_assignments). */
   actorId: ID | null;
   actorName: string;
+  /** Headshot (profiles.avatar_url) — hub cast grid. Optional. */
+  actorAvatarUrl?: string | null;
   assignmentType: AssignmentType;
   status: OfferStatus;
   sortOrder: number;
@@ -388,7 +393,11 @@ export type Announcement = {
 export type ShowFile = {
   id: ID;
   showId: ID;
-  storagePath: string;
+  /** Storage object path for uploaded files; null for link rows (migration 026). */
+  storagePath: string | null;
+  /** External http(s) link (Drive, YouTube, docs) — null for uploaded files.
+   *  Exactly one of storagePath / url is set (DB CHECK, migration 026). */
+  url: string | null;
   label: string;
   category: string | null;
   sizeBytes: number | null;
@@ -396,11 +405,18 @@ export type ShowFile = {
   createdAt: string;
 };
 
-/** One row of the "who to contact for what" routing card. */
+/** One row of the "who to contact for what" routing card. The team decides
+ *  what to share: `phone`/`email` are typed in by hand (QC #30), never pulled
+ *  from private profiles. `userId` links the row to a production team member
+ *  with an account so the hub can offer "Send a note" (QC #32). All optional —
+ *  rows saved before this shape stay valid. */
 export type CommNormItem = {
   topic: string;
   contact: string;
   method: string;
+  phone?: string;
+  email?: string;
+  userId?: ID | null;
 };
 
 /* ── Volunteers — dual-path (Show Hub part 2, SHOW_HUB_SPEC.md) ── */

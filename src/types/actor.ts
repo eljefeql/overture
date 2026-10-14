@@ -89,12 +89,16 @@ export type NotificationPrefs = {
   announcements: boolean;
   /** Cast offer & callback emails. */
   offers: boolean;
+  /** Direct notes from people on your productions (hub "Send a note",
+   *  migration 026). Absent in older stored prefs = true. */
+  messages: boolean;
 };
 
 export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
   reminders: true,
   announcements: true,
   offers: true,
+  messages: true,
 };
 
 export type User = {
