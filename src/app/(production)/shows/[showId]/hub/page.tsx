@@ -30,7 +30,8 @@ import {
   deleteVolunteerNeed,
   claimVolunteerSlot,
   unclaimVolunteerSlot,
-  isShiftPast,
+  getVolunteerEvents,
+  groupVolunteerItems,
   resolveCalledUserIds,
   calledLabel,
   nameForUser,
@@ -67,6 +68,8 @@ import {
 import { useToast } from "@/components/ui/Toast";
 import { ContactActions } from "@/components/hub/ContactActions";
 import { SendNoteModal, type NoteRecipient } from "@/components/hub/SendNoteModal";
+import { VolunteerEventCard } from "@/components/hub/VolunteerEventCard";
+import { VolunteerEventModal } from "@/components/hub/VolunteerEventModal";
 import { SHOW_STATUS_LABELS, SHOW_STATUS_BADGE } from "@/lib/constants";
 import { formatDate, formatTime, formatTeamRole, timeAgo } from "@/lib/utils";
 import {
@@ -117,6 +120,7 @@ import type {
   ShowTeamMember,
   CommNormItem,
   VolunteerNeed,
+  VolunteerEvent,
   ConflictRange,
 } from "@/types";
 
@@ -2494,14 +2498,28 @@ function VolunteersSection({
   const [draft, setDraft] = useState<VolunteerDraft>(EMPTY_VOLUNTEER_DRAFT);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pastOpen, setPastOpen] = useState(false);
+  // Event builder (migration 027): null = closed, {event:null} = adding,
+  // {event, needs} = editing a snapshot (so a refetch mid-edit never
+  // resets the draft under the user's hands).
+  const [eventModal, setEventModal] = useState<
+    | null
+    | { event: null }
+    | { event: VolunteerEvent; needs: VolunteerNeed[] }
+  >(null);
 
   const { data: needs, isLoading } = useQuery({
     queryKey: ["hubVolunteers", showId],
     queryFn: () => getVolunteerNeeds(showId),
   });
+  const { data: events } = useQuery({
+    queryKey: ["hubVolunteerEvents", showId],
+    queryFn: () => getVolunteerEvents(showId),
+  });
 
-  const invalidate = () =>
+  const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["hubVolunteers", showId] });
+    queryClient.invalidateQueries({ queryKey: ["hubVolunteerEvents", showId] });
+  };
 
   const buildInput = (): VolunteerNeedInput | null => {
     if (!draft.label.trim()) {
@@ -2620,9 +2638,100 @@ function VolunteersSection({
   };
 
   // Past shifts stay visible (who helped) but collapsed and never claimable.
+  // Needs inside an event render as ONE grouped card per event (QC #14);
+  // legacy standalone needs render exactly as before.
   const allNeeds = needs ?? [];
-  const list = allNeeds.filter((n) => !isShiftPast(n));
-  const pastList = allNeeds.filter((n) => isShiftPast(n));
+  const items = groupVolunteerItems(allNeeds, events ?? []);
+  const list = items.filter((i) => !i.isPast);
+  const pastList = items.filter((i) => i.isPast);
+
+  const openEventEdit = (event: VolunteerEvent) =>
+    setEventModal({ event, needs: allNeeds });
+
+  /** Role row inside an event card: name · fill · signer pills · claim. */
+  const renderRole = (role: VolunteerNeed, { isPast }: { isPast: boolean }) => {
+    const filled = role.signups.length;
+    const isFull = filled >= role.slots;
+    const mine = role.signups.find((s) => s.userId === userId);
+    return (
+      <div className="flex flex-col sm:flex-row sm:items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-semibold text-curtain-900">
+              {role.roleLabel ?? role.label}
+            </p>
+            <span className="text-xs font-medium text-curtain-700">
+              {filled} of {role.slots} filled
+            </span>
+            {isPast ? null : isFull ? (
+              <Badge variant="success" size="sm">Full</Badge>
+            ) : null}
+          </div>
+          {role.signups.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 mt-1.5">
+              {role.signups.map((s) => (
+                <Pill key={s.id} variant="status" className="cursor-default">
+                  {s.name}
+                  {s.isGuest && (
+                    <span className="ml-1.5 text-[10px] font-semibold text-clay-400 uppercase tracking-wide">
+                      guest
+                    </span>
+                  )}
+                </Pill>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {isPast ? (
+            <span className="text-xs text-clay-400">
+              {mine ? "Thank you for helping!" : "Passed"}
+            </span>
+          ) : mine ? (
+            <>
+              <span className="text-xs font-semibold text-forest-600 flex items-center gap-1">
+                <CheckCircle className="w-4 h-4" weight="duotone" />
+                You&apos;re in
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => unclaimMutation.mutate(role.id)}
+                loading={unclaimMutation.isPending && unclaimMutation.variables === role.id}
+              >
+                Give up my spot
+              </Button>
+            </>
+          ) : isFull ? (
+            <span className="text-xs text-clay-400">All spots taken</span>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => claimMutation.mutate(role.id)}
+              loading={claimMutation.isPending && claimMutation.variables === role.id}
+              icon={<HandHeart className="w-4 h-4 text-stage-500" weight="duotone" />}
+            >
+              Claim
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderItem = (item: (typeof items)[number]) =>
+    item.kind === "need" ? (
+      renderNeed(item.need, item.isPast)
+    ) : (
+      <VolunteerEventCard
+        key={item.key}
+        group={item.group}
+        filledFor={(r) => r.signups.length}
+        renderRole={renderRole}
+        onEdit={isTeam ? () => openEventEdit(item.group.event as VolunteerEvent) : undefined}
+      />
+    );
 
   const renderNeed = (need: VolunteerNeed, isPast: boolean) => {
     const filled = need.signups.length;
@@ -2727,14 +2836,24 @@ function VolunteersSection({
       <div className="flex items-center justify-between gap-2 mb-3">
         <SectionHeader className="mb-0">Volunteers</SectionHeader>
         {isTeam && (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={openAdd}
-            icon={<Plus className="w-4 h-4" weight="bold" />}
-          >
-            Add a need
-          </Button>
+          <div className="flex items-center gap-1 flex-wrap justify-end">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setEventModal({ event: null })}
+              icon={<Plus className="w-4 h-4" weight="bold" />}
+            >
+              Add volunteer event
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={openAdd}
+              icon={<Plus className="w-4 h-4" weight="bold" />}
+            >
+              Add a need
+            </Button>
+          </div>
         )}
       </div>
 
@@ -2765,13 +2884,13 @@ function VolunteersSection({
         <Card variant="flat" padding="standard">
           <p className="text-sm text-clay-500">Loading volunteer needs…</p>
         </Card>
-      ) : allNeeds.length === 0 ? (
+      ) : items.length === 0 ? (
         <Card variant="flat" padding="standard">
           <div className="flex items-center gap-3">
             <HandHeart className="w-6 h-6 text-stage-500 flex-shrink-0" weight="duotone" />
             <p className="text-sm text-clay-500">
               {isTeam
-                ? "No volunteer needs yet. Add ushers, concessions, set build — then share the public link."
+                ? "No volunteer needs yet. Add a volunteer event (set build with shifts and roles) or a simple need (ushers, concessions) — then share the public link."
                 : "No volunteer needs yet. When the team posts them, you can claim a spot with one tap."}
             </p>
           </div>
@@ -2790,7 +2909,7 @@ function VolunteersSection({
               </div>
             </Card>
           )}
-          {list.map((need) => renderNeed(need, false))}
+          {list.map(renderItem)}
           {pastList.length > 0 && (
             <div>
               <button
@@ -2808,13 +2927,22 @@ function VolunteersSection({
               </button>
               {pastOpen && (
                 <div className="flex flex-col gap-3 mt-2">
-                  {pastList.map((need) => renderNeed(need, true))}
+                  {pastList.map(renderItem)}
                 </div>
               )}
             </div>
           )}
         </div>
       )}
+
+      {/* ── Event builder: event → shifts → roles (team, migration 027) ── */}
+      <VolunteerEventModal
+        open={eventModal !== null}
+        onClose={() => setEventModal(null)}
+        showId={showId}
+        existing={eventModal && eventModal.event ? eventModal : null}
+        onSaved={invalidate}
+      />
 
       {/* ── Add / edit volunteer need modal (team) ── */}
       <Modal

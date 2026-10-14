@@ -22,9 +22,13 @@ import {
   commNorms as mockCommNorms,
   volunteerNeeds as mockVolunteerNeeds,
   volunteerSignups as mockVolunteerSignups,
+  volunteerEvents as mockVolunteerEvents,
+  volunteerShifts as mockVolunteerShifts,
   memberConflicts as mockMemberConflicts,
   showLinks as mockShowLinks,
   type MockVolunteerNeed,
+  type MockVolunteerEvent,
+  type MockVolunteerShift,
 } from "@/data/hub";
 import { shows as mockShows } from "@/data/shows";
 import { actors, auditionSignups as mockSignups } from "@/data/actors";
@@ -47,6 +51,8 @@ import type {
   VolunteerSignupEntry,
   VolunteerBoard,
   VolunteerShiftInfo,
+  VolunteerEvent,
+  VolunteerShift,
 } from "@/types";
 
 const delay = (ms = 200) => new Promise((r) => setTimeout(r, ms));
@@ -1267,6 +1273,9 @@ function mockNeedToVolunteerNeed(n: MockVolunteerNeed): VolunteerNeed {
         name: s.name,
         isGuest: s.userId === null,
       })),
+    eventId: n.eventId ?? null,
+    shiftId: n.shiftId ?? null,
+    roleLabel: n.roleLabel ?? null,
   };
 }
 
@@ -1303,6 +1312,10 @@ export async function getVolunteerNeeds(showId: string): Promise<VolunteerNeed[]
               isGuest: !s.user_id,
             })
           ),
+        // Migration 027 columns — undefined pre-paste → null → flat rendering.
+        eventId: n.event_id ?? null,
+        shiftId: n.shift_id ?? null,
+        roleLabel: n.role_label ?? null,
       }));
       /* eslint-enable @typescript-eslint/no-explicit-any */
     } catch (e) {
@@ -1354,6 +1367,9 @@ export async function createVolunteerNeed(
       slots: data.slots,
       notes: data.notes ?? null,
       signups: [],
+      eventId: data.event_id ?? null,
+      shiftId: data.shift_id ?? null,
+      roleLabel: data.role_label ?? null,
     };
   }
   await delay(250);
@@ -1413,11 +1429,500 @@ export async function deleteVolunteerNeed(needId: string): Promise<void> {
     return;
   }
   await delay(200);
+  mockRemoveNeed(needId);
+}
+
+/* ── Events → shifts → roles (migration 027, QC #14) ──
+   An EVENT ("Set build Saturday") has SHIFTS (9–12, 12–3), each with ROLES
+   (Carpentry ×3, Painting ×2). A role IS a volunteer_needs row, so claims,
+   guest signups, cancel tokens, and the T-24h reminder scan are untouched.
+   At write time each role need gets its shift's start/end, the event's
+   date, and a composed label "<role> — <event>" — that denormalization is
+   what keeps the reminder cron + RPC copy working with no redeploy. */
+
+const MIGRATION_027_MSG =
+  "Volunteer events need a database update (migration 027). Nothing was saved — let your Overture admin know. The simple \"Add a need\" path still works in the meantime.";
+
+function isMissingEventsTable(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  if (err.code === "42P01" || err.code === "PGRST205" || err.code === "42703" || err.code === "PGRST204") return true;
+  const m = (err.message ?? "").toLowerCase();
+  return m.includes("does not exist") || m.includes("schema cache");
+}
+
+export type VolunteerRoleInput = {
+  /** Present when editing an existing role (need) row. */
+  id?: ID;
+  label: string;
+  slots: number;
+};
+
+export type VolunteerShiftInput = {
+  id?: ID;
+  /** ISO instants (built from the event date + HH:MM), or null for "any time". */
+  startTime: string | null;
+  endTime: string | null;
+  label: string | null;
+  roles: VolunteerRoleInput[];
+};
+
+export type VolunteerEventInput = {
+  showId: ID;
+  title: string;
+  eventDate: string | null;
+  location: string | null;
+  notes: string | null;
+  shifts: VolunteerShiftInput[];
+};
+
+/** The composed need label for a role — what reminders + RPC copy print. */
+export function composeRoleLabel(role: string, eventTitle: string): string {
+  return `${role.trim()} — ${eventTitle.trim()}`;
+}
+
+function mockRemoveNeed(needId: string) {
   const idx = mockVolunteerNeeds.findIndex((n) => n.id === needId);
   if (idx !== -1) mockVolunteerNeeds.splice(idx, 1);
   for (let i = mockVolunteerSignups.length - 1; i >= 0; i--) {
     if (mockVolunteerSignups[i].needId === needId) mockVolunteerSignups.splice(i, 1);
   }
+}
+
+function mockRemoveShift(shiftId: string) {
+  const idx = mockVolunteerShifts.findIndex((s) => s.id === shiftId);
+  if (idx !== -1) mockVolunteerShifts.splice(idx, 1);
+  mockVolunteerNeeds
+    .filter((n) => n.shiftId === shiftId)
+    .map((n) => n.id)
+    .forEach(mockRemoveNeed);
+}
+
+function mockEventToVolunteerEvent(e: MockVolunteerEvent): VolunteerEvent {
+  return {
+    id: e.id,
+    showId: e.showId,
+    title: e.title,
+    eventDate: e.eventDate,
+    location: e.location,
+    notes: e.notes,
+    shifts: mockVolunteerShifts
+      .filter((s) => s.eventId === e.id)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map(
+        (s): VolunteerShift => ({
+          id: s.id,
+          eventId: s.eventId,
+          startTime: s.startTime,
+          endTime: s.endTime,
+          label: s.label,
+        })
+      ),
+  };
+}
+
+/** Events + their shifts for a show. Roles come from getVolunteerNeeds
+ *  (needs with eventId/shiftId set). Cloud try/catch → [] pre-paste. */
+export async function getVolunteerEvents(showId: string): Promise<VolunteerEvent[]> {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await getSupabase()
+        .from("volunteer_events")
+        .select("*, volunteer_shifts(id, event_id, start_time, end_time, label, sort_order)")
+        .eq("show_id", showId)
+        .order("event_date", { ascending: true, nullsFirst: false })
+        .order("title");
+      if (error) throw error;
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      return (data ?? []).map((e: any): VolunteerEvent => ({
+        id: e.id,
+        showId: e.show_id,
+        title: e.title,
+        eventDate: e.event_date ?? null,
+        location: e.location ?? null,
+        notes: e.notes ?? null,
+        shifts: ((e.volunteer_shifts ?? []) as any[])
+          .slice()
+          .sort(
+            (a, b) =>
+              (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+              String(a.start_time ?? "").localeCompare(String(b.start_time ?? ""))
+          )
+          .map(
+            (s): VolunteerShift => ({
+              id: s.id,
+              eventId: s.event_id,
+              startTime: s.start_time ?? null,
+              endTime: s.end_time ?? null,
+              label: s.label ?? null,
+            })
+          ),
+      }));
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+    } catch (e) {
+      console.warn("getVolunteerEvents — table may not exist yet (paste migration 027):", e);
+      return [];
+    }
+  }
+  await delay();
+  return mockVolunteerEvents
+    .filter((e) => e.showId === showId)
+    .map(mockEventToVolunteerEvent);
+}
+
+function validateEventInput(input: VolunteerEventInput) {
+  if (!input.title.trim()) throw new Error("Give the event a title — e.g. \"Set build Saturday\".");
+  if (input.shifts.length === 0) throw new Error("Add at least one shift.");
+  for (const shift of input.shifts) {
+    if (shift.roles.length === 0) throw new Error("Every shift needs at least one role.");
+    for (const role of shift.roles) {
+      if (!role.label.trim()) throw new Error("Every role needs a name — e.g. \"Carpentry\".");
+      if (!Number.isFinite(role.slots) || role.slots < 1)
+        throw new Error("Each role needs at least 1 spot.");
+    }
+  }
+}
+
+/**
+ * Create an event with all its shifts and roles in one go. Cloud: fails
+ * LOUD pre-paste (a missing volunteer_events table → migration-027 toast);
+ * if a later step fails after the event row exists, the event is deleted
+ * again so there's never a half-created event.
+ */
+export async function createVolunteerEvent(input: VolunteerEventInput): Promise<VolunteerEvent> {
+  validateEventInput(input);
+  if (isSupabaseConfigured) {
+    const supabase = getSupabase();
+    const { data: ev, error } = await supabase
+      .from("volunteer_events")
+      .insert({
+        show_id: input.showId,
+        title: input.title.trim(),
+        event_date: input.eventDate,
+        location: input.location,
+        notes: input.notes,
+      })
+      .select("*")
+      .single();
+    if (error) {
+      if (isMissingEventsTable(error)) throw new Error(MIGRATION_027_MSG);
+      throw new Error(error.message);
+    }
+    try {
+      await writeShiftsAndRoles(ev.id, input);
+    } catch (e) {
+      // Roll back — cascade removes any shifts/roles already written.
+      await supabase.from("volunteer_events").delete().eq("id", ev.id);
+      throw e;
+    }
+    const events = await getVolunteerEvents(input.showId);
+    return events.find((e) => e.id === ev.id)!;
+  }
+  await delay(300);
+  const id = `vevt-${Date.now()}`;
+  mockVolunteerEvents.push({
+    id,
+    showId: input.showId,
+    title: input.title.trim(),
+    eventDate: input.eventDate,
+    location: input.location,
+    notes: input.notes,
+  });
+  mockWriteShiftsAndRoles(id, input);
+  return mockEventToVolunteerEvent(mockVolunteerEvents.find((e) => e.id === id)!);
+}
+
+/**
+ * Save edits to an event: updates the event row, upserts shifts + roles by
+ * id, deletes shifts/roles that were removed from the draft (their signups
+ * go with them — the UI warns + confirms first), and re-stamps every role
+ * with the event's date, its shift's times, and the composed label.
+ */
+export async function saveVolunteerEvent(
+  eventId: ID,
+  input: VolunteerEventInput,
+  existing: VolunteerEvent
+): Promise<void> {
+  validateEventInput(input);
+  if (isSupabaseConfigured) {
+    const supabase = getSupabase();
+    const { error } = await supabase
+      .from("volunteer_events")
+      .update({
+        title: input.title.trim(),
+        event_date: input.eventDate,
+        location: input.location,
+        notes: input.notes,
+      })
+      .eq("id", eventId);
+    if (error) {
+      if (isMissingEventsTable(error)) throw new Error(MIGRATION_027_MSG);
+      throw new Error(error.message);
+    }
+    // Shifts dropped from the draft → delete (cascades their roles + signups).
+    const keptShiftIds = new Set(input.shifts.map((s) => s.id).filter(Boolean));
+    const droppedShifts = existing.shifts.filter((s) => !keptShiftIds.has(s.id)).map((s) => s.id);
+    if (droppedShifts.length > 0) {
+      const { error: delErr } = await supabase
+        .from("volunteer_shifts")
+        .delete()
+        .in("id", droppedShifts);
+      if (delErr) throw new Error(delErr.message);
+    }
+    await writeShiftsAndRoles(eventId, input);
+    return;
+  }
+  await delay(250);
+  const ev = mockVolunteerEvents.find((e) => e.id === eventId);
+  if (!ev) throw new Error("Volunteer event not found.");
+  Object.assign(ev, {
+    title: input.title.trim(),
+    eventDate: input.eventDate,
+    location: input.location,
+    notes: input.notes,
+  });
+  const keptShiftIds = new Set(input.shifts.map((s) => s.id).filter(Boolean));
+  mockVolunteerShifts
+    .filter((s) => s.eventId === eventId && !keptShiftIds.has(s.id))
+    .map((s) => s.id)
+    .forEach(mockRemoveShift);
+  mockWriteShiftsAndRoles(eventId, input);
+}
+
+/** Cloud: upsert shifts + roles for an event; delete roles dropped from
+ *  kept shifts. Roles get the denormalized date/times/label. */
+async function writeShiftsAndRoles(eventId: ID, input: VolunteerEventInput): Promise<void> {
+  const supabase = getSupabase();
+  const title = input.title.trim();
+  for (let si = 0; si < input.shifts.length; si++) {
+    const shift = input.shifts[si];
+    let shiftId = shift.id;
+    const shiftRow = {
+      event_id: eventId,
+      show_id: input.showId,
+      start_time: shift.startTime,
+      end_time: shift.endTime,
+      label: shift.label?.trim() || null,
+      sort_order: si,
+    };
+    if (shiftId) {
+      const { error } = await supabase.from("volunteer_shifts").update(shiftRow).eq("id", shiftId);
+      if (error) throw new Error(error.message);
+    } else {
+      const { data, error } = await supabase
+        .from("volunteer_shifts")
+        .insert(shiftRow)
+        .select("id")
+        .single();
+      if (error) throw new Error(error.message);
+      shiftId = data.id as ID;
+    }
+
+    // Roles dropped from this (kept) shift → delete.
+    const keptRoleIds = shift.roles.map((r) => r.id).filter((x): x is ID => !!x);
+    if (shift.id) {
+      let q = supabase.from("volunteer_needs").delete().eq("shift_id", shiftId);
+      if (keptRoleIds.length > 0) q = q.not("id", "in", `(${keptRoleIds.join(",")})`);
+      const { error } = await q;
+      if (error) throw new Error(error.message);
+    }
+
+    for (const role of shift.roles) {
+      const needRow = {
+        show_id: input.showId,
+        label: composeRoleLabel(role.label, title),
+        role_label: role.label.trim(),
+        event_id: eventId,
+        shift_id: shiftId,
+        event_date: input.eventDate,
+        start_time: shift.startTime,
+        end_time: shift.endTime,
+        slots: role.slots,
+        notes: null,
+      };
+      if (role.id) {
+        const { error } = await supabase.from("volunteer_needs").update(needRow).eq("id", role.id);
+        if (error) throw new Error(error.message);
+      } else {
+        const { error } = await supabase.from("volunteer_needs").insert(needRow);
+        if (error) throw new Error(error.message);
+      }
+    }
+  }
+}
+
+function mockWriteShiftsAndRoles(eventId: ID, input: VolunteerEventInput) {
+  const title = input.title.trim();
+  input.shifts.forEach((shift, si) => {
+    let shiftId = shift.id;
+    if (shiftId) {
+      const row = mockVolunteerShifts.find((s) => s.id === shiftId);
+      if (row) {
+        Object.assign(row, {
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+          label: shift.label?.trim() || null,
+          sortOrder: si,
+        });
+      }
+    } else {
+      shiftId = `vsh-${Date.now()}-${si}`;
+      const row: MockVolunteerShift = {
+        id: shiftId,
+        eventId,
+        showId: input.showId,
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        label: shift.label?.trim() || null,
+        sortOrder: si,
+      };
+      mockVolunteerShifts.push(row);
+    }
+    const keptRoleIds = new Set(shift.roles.map((r) => r.id).filter(Boolean));
+    if (shift.id) {
+      mockVolunteerNeeds
+        .filter((n) => n.shiftId === shiftId && !keptRoleIds.has(n.id))
+        .map((n) => n.id)
+        .forEach(mockRemoveNeed);
+    }
+    shift.roles.forEach((role, ri) => {
+      const fields = {
+        label: composeRoleLabel(role.label, title),
+        roleLabel: role.label.trim(),
+        eventId,
+        shiftId: shiftId!,
+        eventDate: input.eventDate,
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        slots: role.slots,
+        notes: null,
+      };
+      const existing = role.id ? mockVolunteerNeeds.find((n) => n.id === role.id) : null;
+      if (existing) Object.assign(existing, fields);
+      else
+        mockVolunteerNeeds.push({
+          id: `vol-${Date.now()}-${si}-${ri}`,
+          showId: input.showId,
+          ...fields,
+        });
+    });
+  });
+}
+
+/* ── Grouping (shared by the hub + the public guest page) ── */
+
+/** The minimum a need row carries for grouping — satisfied by both
+ *  VolunteerNeed (hub) and VolunteerBoard["needs"][number] (public). */
+export type VolunteerRoleLike = {
+  id: ID;
+  label: string;
+  eventDate: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  slots: number;
+  notes: string | null;
+  eventId?: ID | null;
+  shiftId?: ID | null;
+  roleLabel?: string | null;
+};
+
+export type VolunteerEventLike = {
+  id: ID;
+  title: string;
+  eventDate: string | null;
+  location: string | null;
+  notes: string | null;
+  shifts: VolunteerShift[];
+};
+
+export type GroupedVolunteerEvent<N extends VolunteerRoleLike> = {
+  event: VolunteerEventLike;
+  shifts: { shift: VolunteerShift; roles: N[]; isPast: boolean }[];
+  /** Roles attached to the event but to no shift (not produced by the
+   *  builder, but rendered honestly if they ever exist). */
+  unshifted: N[];
+  roles: N[];
+  isPast: boolean;
+};
+
+export type VolunteerListItem<N extends VolunteerRoleLike> =
+  | { kind: "need"; key: string; need: N; isPast: boolean; sortKey: string }
+  | { kind: "event"; key: string; group: GroupedVolunteerEvent<N>; isPast: boolean; sortKey: string };
+
+/**
+ * Turn flat needs + events into one date-ordered list of standalone needs
+ * and grouped events. Needs whose event can't be found (events read failed,
+ * or pre-paste) fall back to standalone rows — legacy flat rendering.
+ */
+export function groupVolunteerItems<N extends VolunteerRoleLike>(
+  needs: N[],
+  events: VolunteerEventLike[]
+): VolunteerListItem<N>[] {
+  const eventById = new Map(events.map((e) => [e.id, e]));
+  const byEvent = new Map<ID, N[]>();
+  const standalone: N[] = [];
+  for (const n of needs) {
+    if (n.eventId && eventById.has(n.eventId)) {
+      const arr = byEvent.get(n.eventId) ?? [];
+      arr.push(n);
+      byEvent.set(n.eventId, arr);
+    } else {
+      standalone.push(n);
+    }
+  }
+  const items: VolunteerListItem<N>[] = standalone.map((need) => ({
+    kind: "need",
+    key: `need-${need.id}`,
+    need,
+    isPast: isShiftPast(need),
+    sortKey: `${need.eventDate ?? "9999-99-99"}|${need.startTime ?? ""}`,
+  }));
+  for (const event of events) {
+    const roles = byEvent.get(event.id) ?? [];
+    const shifts = event.shifts.map((shift) => {
+      const shiftRoles = roles.filter((r) => r.shiftId === shift.id);
+      const isPast =
+        shiftRoles.length > 0
+          ? shiftRoles.every(isShiftPast)
+          : isShiftPast({ eventDate: event.eventDate, startTime: shift.startTime, endTime: shift.endTime });
+      return { shift, roles: shiftRoles, isPast };
+    });
+    const unshifted = roles.filter((r) => !r.shiftId || !event.shifts.some((s) => s.id === r.shiftId));
+    const isPast =
+      roles.length > 0
+        ? roles.every(isShiftPast)
+        : shifts.length > 0
+          ? shifts.every((s) => s.isPast)
+          : isShiftPast({ eventDate: event.eventDate, startTime: null, endTime: null });
+    const firstStart = event.shifts.map((s) => s.startTime).filter(Boolean).sort()[0] ?? "";
+    items.push({
+      kind: "event",
+      key: `event-${event.id}`,
+      group: { event, shifts, unshifted, roles, isPast },
+      isPast,
+      sortKey: `${event.eventDate ?? "9999-99-99"}|${firstStart}`,
+    });
+  }
+  return items.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+}
+
+/** Delete an event — its shifts, roles, and their signups go with it. */
+export async function deleteVolunteerEvent(eventId: ID): Promise<void> {
+  if (isSupabaseConfigured) {
+    const { error } = await getSupabase().from("volunteer_events").delete().eq("id", eventId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  await delay(200);
+  mockVolunteerShifts
+    .filter((s) => s.eventId === eventId)
+    .map((s) => s.id)
+    .forEach(mockRemoveShift);
+  mockVolunteerNeeds
+    .filter((n) => n.eventId === eventId)
+    .map((n) => n.id)
+    .forEach(mockRemoveNeed);
+  const idx = mockVolunteerEvents.findIndex((e) => e.id === eventId);
+  if (idx !== -1) mockVolunteerEvents.splice(idx, 1);
 }
 
 /**
@@ -1563,6 +2068,20 @@ export async function getVolunteerBoard(
         filled: mockVolunteerSignups.filter(
           (s) => s.needId === n.id && s.status === "confirmed"
         ).length,
+        eventId: n.eventId ?? null,
+        shiftId: n.shiftId ?? null,
+        roleLabel: n.roleLabel ?? null,
+      })),
+    events: mockVolunteerEvents
+      .filter((e) => e.showId === showId)
+      .map(mockEventToVolunteerEvent)
+      .map(({ id, title, eventDate, location, notes, shifts }) => ({
+        id,
+        title,
+        eventDate,
+        location,
+        notes,
+        shifts,
       })),
   };
 }

@@ -219,7 +219,64 @@ export type MockVolunteerNeed = {
   endTime: string | null;
   slots: number;
   notes: string | null;
+  /** Event → shift → role grouping (migration 027). Null = standalone need. */
+  eventId?: string | null;
+  shiftId?: string | null;
+  roleLabel?: string | null;
 };
+
+export type MockVolunteerEvent = {
+  id: string;
+  showId: string;
+  title: string;
+  eventDate: string | null;
+  location: string | null;
+  notes: string | null;
+};
+
+export type MockVolunteerShift = {
+  id: string;
+  eventId: string;
+  showId: string;
+  startTime: string | null;
+  endTime: string | null;
+  label: string | null;
+  sortOrder: number;
+};
+
+/** Nested demo event on show-1: Set build Saturday → two shifts ×
+ *  carpentry / painting / misc. Roles live in `volunteerNeeds` below. */
+export const volunteerEvents: MockVolunteerEvent[] = [
+  {
+    id: "vevt-1",
+    showId: "show-1",
+    title: "Set build Saturday",
+    eventDate: dayFromNow(6),
+    location: "NCT Scene Shop, 1236 Oak Ave (back entrance)",
+    notes: "No experience needed — bring work gloves if you have them. Coffee and donuts on us.",
+  },
+];
+
+export const volunteerShifts: MockVolunteerShift[] = [
+  {
+    id: "vsh-1",
+    eventId: "vevt-1",
+    showId: "show-1",
+    startTime: timeOn(6, "09:00"),
+    endTime: timeOn(6, "12:00"),
+    label: "Morning",
+    sortOrder: 0,
+  },
+  {
+    id: "vsh-2",
+    eventId: "vevt-1",
+    showId: "show-1",
+    startTime: timeOn(6, "12:00"),
+    endTime: timeOn(6, "15:00"),
+    label: "Afternoon",
+    sortOrder: 1,
+  },
+];
 
 export const volunteerNeeds: MockVolunteerNeed[] = [
   {
@@ -242,16 +299,35 @@ export const volunteerNeeds: MockVolunteerNeed[] = [
     slots: 3,
     notes: null,
   },
-  {
-    id: "vol-3",
-    showId: "show-1",
-    label: "Set build Saturday",
-    eventDate: dayFromNow(6),
-    startTime: timeOn(6, "09:00"),
-    endTime: timeOn(6, "14:00"),
-    slots: 10,
-    notes: "No experience needed — bring work gloves if you have them.",
-  },
+  /* Roles inside the Set build Saturday event (two shifts × three roles).
+     A role IS a need: label is composed "<role> — <event>" and the shift's
+     times are copied on, exactly as the cloud write path does. */
+  ...(
+    [
+      ["vsh-1", "09:00", "12:00"],
+      ["vsh-2", "12:00", "15:00"],
+    ] as const
+  ).flatMap(([shiftId, start, end], si) =>
+    (
+      [
+        ["Carpentry", 3],
+        ["Painting", 2],
+        ["Misc / runner", 2],
+      ] as const
+    ).map(([role, slots], ri) => ({
+      id: `vol-3-${si + 1}-${ri + 1}`,
+      showId: "show-1",
+      label: `${role} — Set build Saturday`,
+      eventDate: dayFromNow(6),
+      startTime: timeOn(6, start),
+      endTime: timeOn(6, end),
+      slots,
+      notes: null,
+      eventId: "vevt-1",
+      shiftId,
+      roleLabel: role,
+    }))
+  ),
 ];
 
 export const volunteerSignups: MockVolunteerSignup[] = [
@@ -275,7 +351,7 @@ export const volunteerSignups: MockVolunteerSignup[] = [
   },
   {
     id: "vs-3",
-    needId: "vol-3",
+    needId: "vol-3-1-1",
     userId: null,
     name: "Dana Whitfield",
     guestEmail: "dana.w@example.com",

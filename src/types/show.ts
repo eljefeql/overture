@@ -441,6 +441,32 @@ export type VolunteerNeed = {
   notes: string | null;
   /** Confirmed signups (hub view — production members only). */
   signups: VolunteerSignupEntry[];
+  /** Migration 027: a ROLE inside an event's shift is a need with these set.
+   *  Legacy standalone needs leave all three null. */
+  eventId: ID | null;
+  shiftId: ID | null;
+  roleLabel: string | null;
+};
+
+/** A time window inside a volunteer event (migration 027). */
+export type VolunteerShift = {
+  id: ID;
+  eventId: ID;
+  startTime: string | null;
+  endTime: string | null;
+  /** Optional friendly name — "Morning", "Afternoon". */
+  label: string | null;
+};
+
+/** Event → shifts → roles. Roles are VolunteerNeed rows (eventId/shiftId set). */
+export type VolunteerEvent = {
+  id: ID;
+  showId: ID;
+  title: string;
+  eventDate: string | null;
+  location: string | null;
+  notes: string | null;
+  shifts: VolunteerShift[];
 };
 
 /** Anonymous-safe board for the public /volunteer/[showId] page — slot
@@ -466,6 +492,19 @@ export type VolunteerBoard = {
     slots: number;
     notes: string | null;
     filled: number;
+    /** Grouping (migration 027) — absent/null pre-paste → flat rendering. */
+    eventId?: ID | null;
+    shiftId?: ID | null;
+    roleLabel?: string | null;
+  }[];
+  /** Events with their shifts (migration 027). Absent pre-paste. */
+  events?: {
+    id: ID;
+    title: string;
+    eventDate: string | null;
+    location: string | null;
+    notes: string | null;
+    shifts: VolunteerShift[];
   }[];
 };
 

@@ -9,7 +9,9 @@ import {
   getVolunteerBoard,
   claimVolunteerSlot,
   isShiftPast,
+  groupVolunteerItems,
 } from "@/lib/api/hub";
+import { VolunteerEventCard } from "@/components/hub/VolunteerEventCard";
 import {
   Card,
   Badge,
@@ -168,8 +170,29 @@ export default function PublicVolunteerPage() {
 
   const { show } = board;
   // Guests only ever see shifts that can still be claimed — past-dated
-  // shifts are hidden entirely on the public page (QC P1-7).
-  const needs = board.needs.filter((n) => !isShiftPast(n));
+  // shifts are hidden entirely on the public page (QC P1-7). Needs inside
+  // an event render as one grouped card (QC #14) with past shifts dropped;
+  // legacy standalone needs render exactly as before.
+  const items = groupVolunteerItems(
+    board.needs.filter((n) => !isShiftPast(n)),
+    board.events ?? []
+  )
+    .filter((i) => !i.isPast)
+    .map((i) =>
+      i.kind === "event"
+        ? {
+            ...i,
+            group: {
+              ...i.group,
+              shifts: i.group.shifts.filter((s) => !s.isPast && s.roles.length > 0),
+              unshifted: i.group.unshifted.filter((r) => !isShiftPast(r)),
+            },
+          }
+        : i
+    )
+    .filter(
+      (i) => i.kind === "need" || i.group.shifts.length > 0 || i.group.unshifted.length > 0
+    );
   const dates =
     show.showOpen && show.showClose
       ? `${formatDate(show.showOpen)} – ${formatDate(show.showClose)}`
@@ -187,6 +210,117 @@ export default function PublicVolunteerPage() {
       return;
     }
     claimMutation.mutate(need);
+  };
+
+  /** Claim affordance for one need/role — signed-in one-tap, or the guest
+   *  name + email form (no account). Shared by legacy cards and role rows. */
+  const renderAction = (need: BoardNeed, compact: boolean) => {
+    const open = need.slots - need.filled;
+    const isFull = open <= 0;
+    if (isFull) {
+      return (
+        <p className="text-xs text-clay-400">
+          {compact ? "All spots taken" : "All spots are taken — thank you, everyone!"}
+        </p>
+      );
+    }
+    if (user) {
+      return (
+        <Button
+          size="sm"
+          onClick={() => claimMutation.mutate(need)}
+          loading={claimMutation.isPending && claimMutation.variables?.id === need.id}
+          icon={<HandHeart className="w-4 h-4" weight="duotone" />}
+        >
+          {compact ? "Claim" : "Claim a spot"}
+        </Button>
+      );
+    }
+    if (formFor === need.id) {
+      return (
+        <div className="flex flex-col gap-3 w-full">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+                Your name *
+              </label>
+              <Input
+                value={guestName}
+                onChange={(e) => setGuestName(e.target.value)}
+                placeholder="First and last"
+                autoComplete="name"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+                Email *
+              </label>
+              <Input
+                type="email"
+                value={guestEmail}
+                onChange={(e) => setGuestEmail(e.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
+              Phone (optional)
+            </label>
+            <Input
+              type="tel"
+              value={guestPhone}
+              onChange={(e) => setGuestPhone(e.target.value)}
+              placeholder="In case plans change day-of"
+              autoComplete="tel"
+            />
+          </div>
+          <p className="text-[11px] text-clay-400">
+            We only use this to confirm your shift and send a reminder — no spam, ever.
+          </p>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => submitGuest(need)} loading={claimMutation.isPending}>
+              Sign me up
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setFormFor(null)}>
+              Never mind
+            </Button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <Button
+        size="sm"
+        onClick={() => setFormFor(need.id)}
+        icon={<HandHeart className="w-4 h-4" weight="duotone" />}
+      >
+        {compact ? "Claim" : "Claim a spot"}
+      </Button>
+    );
+  };
+
+  /** Role row inside an event card — counts only, never names (anon-safe). */
+  const renderRole = (role: BoardNeed) => {
+    const open = role.slots - role.filled;
+    const isFull = open <= 0;
+    const formOpen = !user && formFor === role.id;
+    return (
+      <div className={`flex ${formOpen ? "flex-col" : "flex-col sm:flex-row sm:items-center"} gap-2`}>
+        <div className="min-w-0 flex-1 flex items-center gap-2 flex-wrap">
+          <p className="text-sm font-semibold text-curtain-900">{role.roleLabel ?? role.label}</p>
+          {isFull ? (
+            <Badge variant="success" size="sm">Full</Badge>
+          ) : (
+            <Badge variant="warning" size="sm">
+              {open} spot{open === 1 ? "" : "s"} open
+            </Badge>
+          )}
+        </div>
+        <div className="flex-shrink-0">{renderAction(role, true)}</div>
+      </div>
+    );
   };
 
   return (
@@ -294,7 +428,7 @@ export default function PublicVolunteerPage() {
       )}
 
       {/* ── Needs ── */}
-      {needs.length === 0 ? (
+      {items.length === 0 ? (
         <EmptyState
           icon={<HandHeart className="w-12 h-12" weight="duotone" />}
           title="Nothing to sign up for right now"
@@ -302,7 +436,18 @@ export default function PublicVolunteerPage() {
         />
       ) : (
         <div className="flex flex-col gap-3">
-          {needs.map((need) => {
+          {items.map((item) => {
+            if (item.kind === "event") {
+              return (
+                <VolunteerEventCard
+                  key={item.key}
+                  group={item.group}
+                  filledFor={(r) => r.filled}
+                  renderRole={renderRole}
+                />
+              );
+            }
+            const need = item.need;
             const open = need.slots - need.filled;
             const isFull = open <= 0;
             const when = shiftWhen(need);
@@ -330,89 +475,7 @@ export default function PublicVolunteerPage() {
                   )}
                 </div>
 
-                <div className="mt-3">
-                  {isFull ? (
-                    <p className="text-xs text-clay-400">
-                      All spots are taken — thank you, everyone!
-                    </p>
-                  ) : user ? (
-                    <Button
-                      size="sm"
-                      onClick={() => claimMutation.mutate(need)}
-                      loading={
-                        claimMutation.isPending &&
-                        claimMutation.variables?.id === need.id
-                      }
-                      icon={<HandHeart className="w-4 h-4" weight="duotone" />}
-                    >
-                      Claim a spot
-                    </Button>
-                  ) : formFor === need.id ? (
-                    <div className="flex flex-col gap-3">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
-                            Your name *
-                          </label>
-                          <Input
-                            value={guestName}
-                            onChange={(e) => setGuestName(e.target.value)}
-                            placeholder="First and last"
-                            autoComplete="name"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
-                            Email *
-                          </label>
-                          <Input
-                            type="email"
-                            value={guestEmail}
-                            onChange={(e) => setGuestEmail(e.target.value)}
-                            placeholder="you@example.com"
-                            autoComplete="email"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
-                          Phone (optional)
-                        </label>
-                        <Input
-                          type="tel"
-                          value={guestPhone}
-                          onChange={(e) => setGuestPhone(e.target.value)}
-                          placeholder="In case plans change day-of"
-                          autoComplete="tel"
-                        />
-                      </div>
-                      <p className="text-[11px] text-clay-400">
-                        We only use this to confirm your shift and send a
-                        reminder — no spam, ever.
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="sm"
-                          onClick={() => submitGuest(need)}
-                          loading={claimMutation.isPending}
-                        >
-                          Sign me up
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setFormFor(null)}>
-                          Never mind
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <Button
-                      size="sm"
-                      onClick={() => setFormFor(need.id)}
-                      icon={<HandHeart className="w-4 h-4" weight="duotone" />}
-                    >
-                      Claim a spot
-                    </Button>
-                  )}
-                </div>
+                <div className="mt-3">{renderAction(need, false)}</div>
               </Card>
             );
           })}
