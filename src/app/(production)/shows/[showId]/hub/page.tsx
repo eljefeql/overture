@@ -2743,7 +2743,7 @@ function VolunteersSection({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <p className="text-sm font-semibold text-curtain-900">{need.label}</p>
+              <p className="text-lg font-display text-curtain-900">{need.label}</p>
               {isPast ? (
                 <Badge size="sm">Past</Badge>
               ) : isFull ? (

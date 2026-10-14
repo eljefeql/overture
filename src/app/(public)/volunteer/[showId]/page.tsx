@@ -455,7 +455,7 @@ export default function PublicVolunteerPage() {
               <Card key={need.id} variant="elevated" padding="standard">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-curtain-900">{need.label}</p>
+                    <p className="text-lg font-display text-curtain-900">{need.label}</p>
                     {when && (
                       <p className="text-xs text-clay-500 flex items-center gap-1.5 mt-1">
                         <Calendar className="w-3.5 h-3.5 text-stage-500" weight="duotone" />
