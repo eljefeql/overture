@@ -32,10 +32,19 @@ import {
   resolveCalledUserIds,
   calledLabel,
   nameForUser,
+  addMemberConflict,
+  removeMemberConflict,
+  removeSignupConflict,
+  myConflictRanges,
+  rangesCoverDate,
   type HubData,
   type RehearsalInput,
   type VolunteerNeedInput,
 } from "@/lib/api/hub";
+import {
+  ConflictDatePicker,
+  type ConflictDate,
+} from "@/components/auditions/ConflictDatePicker";
 import {
   Card,
   CardHeader,
@@ -88,6 +97,8 @@ import {
   CaretDown,
   CaretUp,
   ClockCounterClockwise,
+  CalendarBlank,
+  X,
 } from "@phosphor-icons/react";
 import type {
   ID,
@@ -98,6 +109,7 @@ import type {
   ShowFile,
   CommNormItem,
   VolunteerNeed,
+  ConflictRange,
 } from "@/types";
 
 /* ============================================================
@@ -230,6 +242,7 @@ export default function ShowHubPage() {
           showId={showId}
         />
         <ScheduleSection data={data} userId={user.id} isTeam={isTeam} showId={showId} />
+        <MyConflictsSection data={data} userId={user.id} showId={showId} />
         <PeopleSection data={data} isTeam={isTeam} showId={showId} />
         <ResourcesSection
           files={files ?? []}
@@ -289,6 +302,12 @@ function NextCallSection({
         (a) => a.rehearsalId === nextCall.id && a.userId === userId
       )
     : undefined;
+
+  // The viewer's own conflict ranges (audition signup + hub-added) overlap
+  // this call? Heads-up only — never auto-creates an absence.
+  const myConflictOnCall =
+    !!nextCall &&
+    rangesCoverDate(myConflictRanges(data.conflicts, userId).ranges, nextCall.date);
 
   const absenceMutation = useMutation({
     mutationFn: () =>
@@ -376,6 +395,15 @@ function NextCallSection({
               )}
               {nextCall.notes && (
                 <p className="text-xs text-clay-500 mt-1">{nextCall.notes}</p>
+              )}
+              {myConflictOnCall && !myAbsence && (
+                <p className="text-xs text-stage-700 flex items-start gap-1.5 mt-2">
+                  <Warning className="w-3.5 h-3.5 text-stage-500 flex-shrink-0 mt-0.5" weight="duotone" />
+                  <span>
+                    You have a conflict on this date. If you can&apos;t make it, tap
+                    &ldquo;Can&apos;t make it&rdquo; so the team knows.
+                  </span>
+                </p>
               )}
 
               {myAbsence ? (
@@ -950,6 +978,34 @@ function ScheduleSection({
     return list;
   }, [data.cast, data.team]);
 
+  // The viewer's own unified conflict ranges — "You have a conflict" chips.
+  const myRanges = useMemo(
+    () => myConflictRanges(data.conflicts, userId).ranges,
+    [data.conflicts, userId]
+  );
+
+  // QC #17 — conflicts on the date being scheduled (team-only, unified
+  // data, company members only — auditionees who weren't cast don't count).
+  const companyIds = useMemo(() => {
+    const ids = new Set<ID>();
+    for (const c of data.cast) if (c.actorId) ids.add(c.actorId);
+    for (const t of data.team) ids.add(t.userId);
+    return ids;
+  }, [data.cast, data.team]);
+  const draftDateConflicts = useMemo(() => {
+    if (!draft.date) return [];
+    return data.conflicts
+      .filter(
+        (c) => companyIds.has(c.actorId) && rangesCoverDate(c.ranges, draft.date)
+      )
+      .map((c) => c.actorName || nameForUser(c.actorId, data.cast, data.team))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  }, [draft.date, data.conflicts, data.cast, data.team, companyIds]);
+  const editingAbsences = editingId
+    ? data.absences.filter((a) => a.rehearsalId === editingId)
+    : [];
+
   const today = todayKey();
   const weekEnd = dayKeyPlus(7);
   const upcoming = data.rehearsals.filter((r) => r.date >= today);
@@ -970,6 +1026,7 @@ function ScheduleSection({
   const renderRow = (r: Rehearsal) => {
     const calledIds = resolveCalledUserIds(r, data.cast, data.team, data.roles);
     const iAmCalled = calledIds.has(userId);
+    const iHaveConflict = iAmCalled && rangesCoverDate(myRanges, r.date);
     const absences = data.absences.filter((a) => a.rehearsalId === r.id);
     const conflictCount = data.conflicts.filter(
       (c) =>
@@ -1003,6 +1060,11 @@ function ScheduleSection({
             {isTeam && conflictCount > 0 && (
               <Badge variant="warning" size="sm">
                 {conflictCount} conflict{conflictCount === 1 ? "" : "s"}
+              </Badge>
+            )}
+            {iHaveConflict && (
+              <Badge variant="warning" size="sm">
+                You have a conflict
               </Badge>
             )}
             {absences.length > 0 && (
@@ -1141,6 +1203,36 @@ function ScheduleSection({
               />
             </div>
           </div>
+          {/* QC #17 — who's got a conflict on the chosen date, BEFORE saving.
+              Heads-up only, never blocking. */}
+          {draft.date && (
+            <Card variant="flat" padding="compact">
+              {draftDateConflicts.length > 0 ? (
+                <p className="text-xs text-curtain-800 flex items-start gap-1.5">
+                  <Warning className="w-4 h-4 text-stage-500 flex-shrink-0" weight="duotone" />
+                  <span>
+                    <span className="font-semibold">
+                      {draftDateConflicts.length}{" "}
+                      {draftDateConflicts.length === 1 ? "person has" : "people have"}{" "}
+                      conflicts that day:
+                    </span>{" "}
+                    {draftDateConflicts.join(", ")}
+                  </span>
+                </p>
+              ) : (
+                <p className="text-xs text-clay-500 flex items-center gap-1.5">
+                  <CheckCircle className="w-4 h-4 text-stage-500 flex-shrink-0" weight="duotone" />
+                  No known conflicts that day.
+                </p>
+              )}
+              {editingAbsences.length > 0 && (
+                <p className="text-xs text-clay-500 mt-1.5">
+                  Already reported out for this rehearsal:{" "}
+                  {editingAbsences.map((a) => a.userName).join(", ")}
+                </p>
+              )}
+            </Card>
+          )}
           <div>
             <label className="text-xs font-semibold text-curtain-700 uppercase tracking-wide">
               What&apos;s being worked
@@ -1256,6 +1348,168 @@ function ScheduleSection({
           </div>
         </div>
       </Modal>
+    </section>
+  );
+}
+
+/* ============================================================
+   3b. My conflicts — dates the viewer can't rehearse. The UNION
+   of their audition-signup ranges and ranges added here
+   (member_conflicts, migration 025). Every production member
+   sees their own; the team sees everyone's in the schedule
+   counts, the rehearsal modal, and the Conflict Calendar.
+   Mobile-first: actors fill this in from their phones.
+   ============================================================ */
+
+function formatRangeLabel(r: ConflictRange): string {
+  const fmt = (d: string) =>
+    new Date(`${d}T12:00:00`).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+  return r.startDate === r.endDate
+    ? fmt(r.startDate)
+    : `${fmt(r.startDate)} – ${fmt(r.endDate)}`;
+}
+
+function MyConflictsSection({
+  data,
+  userId,
+  showId,
+}: {
+  data: HubData;
+  userId: ID;
+  showId: string;
+}) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { signupId, ranges } = myConflictRanges(data.conflicts, userId);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["hub", showId] });
+    queryClient.invalidateQueries({ queryKey: ["showConflicts", showId] });
+  };
+
+  const addMutation = useMutation({
+    mutationFn: (c: ConflictDate) =>
+      addMemberConflict({
+        showId,
+        userId,
+        startDate: c.startDate,
+        endDate: c.endDate,
+        note: c.note?.trim() || null,
+      }),
+    onSuccess: () => {
+      invalidate();
+      toast("success", "Conflict saved — the team can see it when scheduling.");
+    },
+    onError: (err: Error) => toast("error", err.message),
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: async (r: ConflictRange) => {
+      if (!r.id) throw new Error("This conflict can't be removed here.");
+      if (r.source === "signup") {
+        if (!signupId) throw new Error("This conflict can't be removed here.");
+        await removeSignupConflict({
+          rangeId: r.id,
+          signupId,
+          startDate: r.startDate,
+          endDate: r.endDate,
+        });
+      } else {
+        await removeMemberConflict(r.id);
+      }
+    },
+    onMutate: (r) => setRemovingId(r.id ?? null),
+    onSettled: () => setRemovingId(null),
+    onSuccess: () => {
+      invalidate();
+      toast("info", "Conflict removed.");
+    },
+    onError: (err: Error) => toast("error", err.message),
+  });
+
+  // Can't add conflicts in the past; cap at the show's close if we know it.
+  const today = todayKey();
+  const maxDate =
+    data.show?.showClose && data.show.showClose >= today
+      ? data.show.showClose
+      : undefined;
+
+  return (
+    <section>
+      <SectionHeader>My Conflicts</SectionHeader>
+      <Card variant="elevated" padding="standard">
+        <p className="text-sm text-clay-500 mb-4">
+          Dates you can&apos;t rehearse. The team sees these when scheduling —
+          keeping this current saves everyone a phone call.
+        </p>
+
+        {ranges.length > 0 ? (
+          <div className="flex flex-col gap-2 mb-4">
+            {ranges.map((r) => {
+              const key = r.id ?? `${r.startDate}-${r.endDate}`;
+              const isRemoving = removeMutation.isPending && removingId === r.id;
+              return (
+                <Card key={key} variant="flat" padding="compact">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <CalendarBlank
+                        className="w-5 h-5 text-stage-500 flex-shrink-0 mt-0.5"
+                        weight="duotone"
+                      />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-curtain-900">
+                          {formatRangeLabel(r)}
+                        </p>
+                        <p className="text-xs text-clay-400">
+                          {r.source === "signup"
+                            ? "from your audition signup"
+                            : "added here"}
+                          {r.note ? ` · ${r.note}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                    {r.id && (
+                      <button
+                        onClick={() => removeMutation.mutate(r)}
+                        disabled={isRemoving}
+                        aria-label={`Remove conflict ${formatRangeLabel(r)}`}
+                        className="p-2 -m-1 rounded-full text-clay-400 hover:text-ruby-600 hover:bg-ruby-50 transition disabled:opacity-50 flex-shrink-0"
+                      >
+                        <X className="w-4 h-4" weight="bold" />
+                      </button>
+                    )}
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-curtain-700 mb-4 flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-stage-500 flex-shrink-0" weight="duotone" />
+            No conflicts yet — add any dates you can&apos;t rehearse.
+          </p>
+        )}
+
+        <ConflictDatePicker
+          conflicts={[]}
+          onChange={(list) => {
+            const added = list[list.length - 1];
+            if (added) addMutation.mutate(added);
+          }}
+          minDate={today}
+          maxDate={maxDate}
+          label={null}
+          hint={null}
+          withNote
+        />
+        {addMutation.isPending && (
+          <p className="text-xs text-clay-400 mt-2">Saving…</p>
+        )}
+      </Card>
     </section>
   );
 }

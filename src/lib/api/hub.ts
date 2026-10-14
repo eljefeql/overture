@@ -22,10 +22,11 @@ import {
   commNorms as mockCommNorms,
   volunteerNeeds as mockVolunteerNeeds,
   volunteerSignups as mockVolunteerSignups,
+  memberConflicts as mockMemberConflicts,
   type MockVolunteerNeed,
 } from "@/data/hub";
 import { shows as mockShows } from "@/data/shows";
-import { actors } from "@/data/actors";
+import { actors, auditionSignups as mockSignups } from "@/data/actors";
 import type {
   ID,
   Show,
@@ -458,6 +459,139 @@ export async function cancelAbsence(
     (a) => a.rehearsalId === rehearsalId && a.userId === userId
   );
   if (idx !== -1) mockAbsences.splice(idx, 1);
+}
+
+/* ============================================================
+   My conflicts — dates a production member can't rehearse
+   (member_conflicts, migration 025). Reads ride getShowConflicts
+   (client.ts) which unions these with audition-signup ranges;
+   RLS hands a cast member only their own rows. Writes fail LOUD
+   pre-paste: silently losing a conflict is worse than an error.
+   ============================================================ */
+
+const MIGRATION_025_MSG =
+  "Saving conflicts needs a database update (migration 025). Your conflict was NOT saved — let your Overture admin know, and text the stage manager in the meantime.";
+
+/** Postgres "relation does not exist" (42P01) or PostgREST's schema-cache
+ *  miss — both mean the table hasn't been pasted yet. */
+function isMissingTable(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  if (err.code === "42P01" || err.code === "PGRST205") return true;
+  const m = (err.message ?? "").toLowerCase();
+  return m.includes("does not exist") || m.includes("schema cache");
+}
+
+export type MemberConflictInput = {
+  showId: ID;
+  userId: ID;
+  startDate: string;
+  endDate: string;
+  note: string | null;
+};
+
+/** Add a hub conflict range for the signed-in member. Returns the row id. */
+export async function addMemberConflict(
+  input: MemberConflictInput
+): Promise<ID> {
+  if (input.endDate < input.startDate) {
+    throw new Error("The end date can't be before the start date.");
+  }
+  if (isSupabaseConfigured) {
+    const { data, error } = await getSupabase()
+      .from("member_conflicts")
+      .insert({
+        show_id: input.showId,
+        user_id: input.userId,
+        start_date: input.startDate,
+        end_date: input.endDate,
+        note: input.note,
+      })
+      .select("id")
+      .single();
+    if (error) {
+      if (isMissingTable(error)) throw new Error(MIGRATION_025_MSG);
+      throw new Error(error.message);
+    }
+    return data.id as ID;
+  }
+  await delay(250);
+  const id = `mc-${Date.now()}`;
+  mockMemberConflicts.push({
+    id,
+    showId: input.showId,
+    userId: input.userId,
+    startDate: input.startDate,
+    endDate: input.endDate,
+    note: input.note,
+    createdAt: new Date().toISOString(),
+  });
+  return id;
+}
+
+/** Remove one of your own hub-added ranges. */
+export async function removeMemberConflict(conflictId: ID): Promise<void> {
+  if (isSupabaseConfigured) {
+    const { error } = await getSupabase()
+      .from("member_conflicts")
+      .delete()
+      .eq("id", conflictId);
+    if (error) {
+      if (isMissingTable(error)) throw new Error(MIGRATION_025_MSG);
+      throw new Error(error.message);
+    }
+    return;
+  }
+  await delay(200);
+  const idx = mockMemberConflicts.findIndex((m) => m.id === conflictId);
+  if (idx !== -1) mockMemberConflicts.splice(idx, 1);
+}
+
+/**
+ * Remove one of your own AUDITION-SIGNUP ranges (signup_conflicts row) from
+ * the hub card — the actor owns it (migration 009 already grants the actor
+ * DELETE on rows hanging off their own signup). The legacy freetext
+ * `audition_signups.conflicts` string is left untouched on purpose.
+ */
+export async function removeSignupConflict(input: {
+  rangeId: ID;
+  signupId: ID;
+  startDate: string;
+  endDate: string;
+}): Promise<void> {
+  if (isSupabaseConfigured) {
+    const { error } = await getSupabase()
+      .from("signup_conflicts")
+      .delete()
+      .eq("id", input.rangeId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  await delay(200);
+  const signup = mockSignups.find((s) => s.id === input.signupId);
+  if (!signup?.conflictDates) return;
+  const idx = signup.conflictDates.findIndex(
+    (c) => c.startDate === input.startDate && c.endDate === input.endDate
+  );
+  if (idx !== -1) signup.conflictDates.splice(idx, 1);
+}
+
+/** The viewer's own unified ranges for this show, from a hub conflicts list. */
+export function myConflictRanges(
+  conflicts: ShowConflictEntry[],
+  userId: ID
+) {
+  const mine = conflicts.find((c) => c.actorId === userId);
+  return mine
+    ? { signupId: mine.signupId, ranges: mine.ranges }
+    : { signupId: null, ranges: [] };
+}
+
+/** Does any of these ranges cover the given YYYY-MM-DD date? */
+export function rangesCoverDate(
+  ranges: { startDate: string; endDate: string }[],
+  date: string
+): boolean {
+  return ranges.some((r) => r.startDate <= date && date <= r.endDate);
 }
 
 /* ============================================================

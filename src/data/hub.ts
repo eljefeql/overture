@@ -129,6 +129,35 @@ export const announcements: Announcement[] = [
   },
 ];
 
+/** Mock mirror of `member_conflicts` (migration 025) — conflicts a production
+ *  member added on the Show Hub "My conflicts" card (as opposed to the ones
+ *  entered at audition signup, which live on mock signups' `conflictDates`).
+ *  Mutated in place by hub.ts in mock mode. Dates are relative to today so a
+ *  demo rehearsal always shows the union in the team view. */
+export type MockMemberConflict = {
+  id: string;
+  showId: string;
+  userId: string;
+  startDate: string;
+  endDate: string;
+  note: string | null;
+  createdAt: string;
+};
+
+export const memberConflicts: MockMemberConflict[] = [
+  {
+    // Marcus Bell (Narrator, accepted cast on show-1) — overlaps reh-4
+    // (full company) so the team sees "1 conflict" next to that rehearsal.
+    id: "mc-1",
+    showId: "show-1",
+    userId: "actor-5",
+    startDate: dayFromNow(7),
+    endDate: dayFromNow(9),
+    note: "Out of town for a wedding",
+    createdAt: isoAgo(30),
+  },
+];
+
 export const commNorms: Record<string, CommNormItem[]> = {
   "show-1": [
     { topic: "Running late to rehearsal", contact: "Tom Briggs (SM)", method: "Text (951) 555-0102" },

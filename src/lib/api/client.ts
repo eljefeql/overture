@@ -6,6 +6,7 @@
 
 import { shows, allShowRoles, showTeam, auditionGroups, orgs, orgMembers, castAssignments, venues as mockVenues, orgLeadership as mockOrgLeadership, orgPastProductions as mockPastProductions } from "@/data/shows";
 import { actors, auditionSignups, teamNotes, callbacks } from "@/data/actors";
+import { memberConflicts as mockMemberConflicts } from "@/data/hub";
 import type {
   Show,
   ShowRole,
@@ -1427,47 +1428,163 @@ export async function getAuditionSignups(
   return auditionSignups.filter((s) => s.showId === showId);
 }
 
+/** One hub-added conflict row (member_conflicts, migration 025) with the
+ *  owner's display info — the shape `mergeMemberConflicts` folds in. */
+type MemberConflictRow = {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string | null;
+  startDate: string;
+  endDate: string;
+  note: string | null;
+};
+
+const byStart = (a: ConflictRange, b: ConflictRange) =>
+  a.startDate.localeCompare(b.startDate);
+
+/**
+ * Fold hub-added ranges into the signup-derived entries. A person who also
+ * auditioned gets their ranges appended to the existing entry (exact
+ * duplicates dropped); anyone else (precast cast, production team) becomes a
+ * synthetic entry so every consumer — hub counts, Conflict Calendar, casting
+ * fit — sees one unified list. Pure; shared by both modes.
+ */
+function mergeMemberConflicts(
+  entries: ShowConflictEntry[],
+  rows: MemberConflictRow[],
+  acceptedCastIds: Set<string>
+): ShowConflictEntry[] {
+  const byActor = new Map(entries.map((e) => [e.actorId, e]));
+  for (const row of rows) {
+    const range: ConflictRange = {
+      id: row.id,
+      startDate: row.startDate,
+      endDate: row.endDate,
+      source: "member",
+      note: row.note,
+    };
+    const existing = byActor.get(row.userId);
+    if (existing) {
+      const dup = existing.ranges.some(
+        (r) =>
+          r.source === "member" &&
+          r.startDate === range.startDate &&
+          r.endDate === range.endDate &&
+          (r.note ?? null) === (range.note ?? null)
+      );
+      if (!dup) existing.ranges.push(range);
+      continue;
+    }
+    const isCast = acceptedCastIds.has(row.userId);
+    const entry: ShowConflictEntry = {
+      signupId: `member:${row.userId}`,
+      actorId: row.userId,
+      actorName: row.userName,
+      actorEmail: row.userEmail,
+      status: isCast ? "cast" : "signed_up",
+      memberKind: isCast ? "cast" : "team",
+      ranges: [range],
+    };
+    byActor.set(row.userId, entry);
+    entries.push(entry);
+  }
+  for (const e of entries) e.ranges.sort(byStart);
+  return entries;
+}
+
 /**
  * Conflict Calendar read model — every non-withdrawn signup for a show with
  * its structured conflict ranges (signup_conflicts, migration 009), actor
- * name/email, and signup status. Cloud reads are try/catch-wrapped → [] until
- * PASTE_ME_NEXT.sql is pasted.
+ * name/email, and signup status, UNIONED with the ranges production members
+ * added on the Show Hub (member_conflicts, migration 025). Each range carries
+ * its row id + source so the owner can remove it from the hub card. Cloud
+ * reads are try/catch-wrapped per table → degrade independently, never crash.
+ * RLS shapes the result: managers see everyone, a cast member sees only their
+ * own rows (which is exactly what the hub "My conflicts" card needs).
  */
 export async function getShowConflicts(
   showId: string
 ): Promise<ShowConflictEntry[]> {
   if (isSupabaseConfigured) {
-    try {
-      const { data, error } = await getSupabase()
-        .from("audition_signups")
-        .select(
-          "id, actor_id, status, profiles:actor_id(display_name, email), signup_conflicts(start_date, end_date)"
-        )
-        .eq("show_id", showId)
-        .neq("status", "withdrawn");
-      if (error) throw new Error(error.message);
-      /* eslint-disable @typescript-eslint/no-explicit-any */
-      return (data ?? []).map((r: any) => ({
-        signupId: r.id,
-        actorId: r.actor_id,
-        actorName: r.profiles?.display_name ?? "",
-        actorEmail: r.profiles?.email ?? null,
-        status: r.status,
-        ranges: (r.signup_conflicts ?? [])
-          .map((c: any) => ({ startDate: c.start_date, endDate: c.end_date }))
-          .sort((a: ConflictRange, b: ConflictRange) =>
-            a.startDate.localeCompare(b.startDate)
-          ),
-      }));
-      /* eslint-enable @typescript-eslint/no-explicit-any */
-    } catch (e) {
-      // signup_conflicts not migrated yet — degrade to empty, never crash.
-      console.warn("Show conflicts unavailable (migration 009 pending?):", e);
-      return [];
-    }
+    const supabase = getSupabase();
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const [entries, memberRows, acceptedCastIds] = await Promise.all([
+      (async (): Promise<ShowConflictEntry[]> => {
+        try {
+          const { data, error } = await supabase
+            .from("audition_signups")
+            .select(
+              "id, actor_id, status, profiles:actor_id(display_name, email), signup_conflicts(id, start_date, end_date)"
+            )
+            .eq("show_id", showId)
+            .neq("status", "withdrawn");
+          if (error) throw new Error(error.message);
+          return (data ?? []).map((r: any) => ({
+            signupId: r.id,
+            actorId: r.actor_id,
+            actorName: r.profiles?.display_name ?? "",
+            actorEmail: r.profiles?.email ?? null,
+            status: r.status,
+            ranges: (r.signup_conflicts ?? [])
+              .map(
+                (c: any): ConflictRange => ({
+                  id: c.id,
+                  startDate: c.start_date,
+                  endDate: c.end_date,
+                  source: "signup",
+                })
+              )
+              .sort(byStart),
+          }));
+        } catch (e) {
+          // signup_conflicts not migrated yet — degrade to empty, never crash.
+          console.warn("Show conflicts unavailable (migration 009 pending?):", e);
+          return [];
+        }
+      })(),
+      (async (): Promise<MemberConflictRow[]> => {
+        try {
+          const { data, error } = await supabase
+            .from("member_conflicts")
+            .select("id, user_id, start_date, end_date, note, profiles:user_id(display_name, email)")
+            .eq("show_id", showId);
+          if (error) throw new Error(error.message);
+          return (data ?? []).map((r: any) => ({
+            id: r.id,
+            userId: r.user_id,
+            userName: r.profiles?.display_name ?? "",
+            userEmail: r.profiles?.email ?? null,
+            startDate: r.start_date,
+            endDate: r.end_date,
+            note: r.note ?? null,
+          }));
+        } catch (e) {
+          // member_conflicts not migrated yet — degrade to empty, never crash.
+          console.warn("Member conflicts unavailable (migration 025 pending?):", e);
+          return [];
+        }
+      })(),
+      (async (): Promise<Set<string>> => {
+        try {
+          const { data } = await supabase
+            .from("cast_assignments")
+            .select("actor_id")
+            .eq("show_id", showId)
+            .eq("status", "accepted");
+          return new Set(
+            (data ?? []).map((r: any) => r.actor_id).filter(Boolean)
+          );
+        } catch {
+          return new Set();
+        }
+      })(),
+    ]);
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+    return mergeMemberConflicts(entries, memberRows, acceptedCastIds);
   }
   await delay();
-  return auditionSignups
+  const entries: ShowConflictEntry[] = auditionSignups
     .filter((s) => s.showId === showId && s.status !== "withdrawn")
     .map((s) => ({
       signupId: s.id,
@@ -1476,9 +1593,40 @@ export async function getShowConflicts(
       actorEmail: actors.find((a) => a.id === s.actorId)?.email ?? null,
       status: s.status,
       ranges: (s.conflictDates ?? [])
-        .slice()
-        .sort((a, b) => a.startDate.localeCompare(b.startDate)),
+        .map(
+          (c, i): ConflictRange => ({
+            // Mock rows have no ids — synthesize a stable one from position.
+            id: c.id ?? `${s.id}:${i}`,
+            startDate: c.startDate,
+            endDate: c.endDate,
+            source: "signup",
+          })
+        )
+        .sort(byStart),
     }));
+  const memberRows: MemberConflictRow[] = mockMemberConflicts
+    .filter((m) => m.showId === showId)
+    .map((m) => {
+      const actor = actors.find((a) => a.id === m.userId);
+      const teamHit = showTeam.find(
+        (t) => t.showId === showId && t.userId === m.userId
+      );
+      return {
+        id: m.id,
+        userId: m.userId,
+        userName: actor?.displayName ?? teamHit?.userName ?? "",
+        userEmail: actor?.email ?? teamHit?.email ?? null,
+        startDate: m.startDate,
+        endDate: m.endDate,
+        note: m.note,
+      };
+    });
+  const acceptedCastIds = new Set(
+    castAssignments
+      .filter((c) => c.showId === showId && c.status === "accepted" && c.actorId)
+      .map((c) => c.actorId as string)
+  );
+  return mergeMemberConflicts(entries, memberRows, acceptedCastIds);
 }
 
 export type DiscoverFilters = {

@@ -553,9 +553,13 @@ export default function ConflictCalendarPage() {
                               <span className="text-sm font-semibold text-curtain-900 truncate">
                                 {p.actorName}
                               </span>
-                              <Badge variant={SIGNUP_STATUS_BADGE[p.status] as "default"} size="sm">
-                                {SIGNUP_STATUS_LABELS[p.status]}
-                              </Badge>
+                              {p.memberKind === "team" ? (
+                                <Badge variant="muted" size="sm">Production team</Badge>
+                              ) : (
+                                <Badge variant={SIGNUP_STATUS_BADGE[p.status] as "default"} size="sm">
+                                  {SIGNUP_STATUS_LABELS[p.status]}
+                                </Badge>
+                              )}
                             </div>
                             <div className="flex flex-wrap items-center gap-1.5 flex-1">
                               {p.ranges.length > 0 ? (
@@ -598,7 +602,8 @@ export default function ConflictCalendarPage() {
                 Counting {statusFiltered.length}{" "}
                 {statusFiltered.length === 1 ? "person" : "people"} in this view ·{" "}
                 {totalConflictPeople} with at least one conflict day in the rehearsal
-                period. Conflicts come from what actors entered at signup.
+                period. Conflicts come from audition signups plus any dates
+                company members add on the Show Hub.
               </p>
             </>
           )}

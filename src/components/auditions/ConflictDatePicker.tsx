@@ -8,6 +8,8 @@ export type ConflictDate = {
   id: string;
   startDate: string; // YYYY-MM-DD
   endDate: string;   // YYYY-MM-DD
+  /** Optional free-text note — only collected when `withNote` is on. */
+  note?: string;
 };
 
 type Props = {
@@ -17,6 +19,12 @@ type Props = {
   minDate?: string;
   /** Latest selectable date (e.g. show close) */
   maxDate?: string;
+  /** Heading above the picker; `null` hides it. Defaults to the signup copy. */
+  label?: string | null;
+  /** Helper line under the heading; `null` hides it. Defaults to the signup copy. */
+  hint?: string | null;
+  /** Show an optional note field in the add form (Show Hub "My conflicts"). */
+  withNote?: boolean;
 };
 
 export function ConflictDatePicker({
@@ -24,10 +32,14 @@ export function ConflictDatePicker({
   onChange,
   minDate,
   maxDate,
+  label = "Scheduling Conflicts",
+  hint = "Mark any dates you're unavailable between rehearsals and performances.",
+  withNote = false,
 }: Props) {
   const [adding, setAdding] = useState(false);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [note, setNote] = useState("");
 
   const addConflict = () => {
     if (!startDate) return;
@@ -35,10 +47,12 @@ export function ConflictDatePicker({
       id: `conflict-${Date.now()}`,
       startDate,
       endDate: endDate || startDate, // single day if no end
+      ...(withNote && note.trim() ? { note: note.trim() } : {}),
     };
     onChange([...conflicts, conflict]);
     setStartDate("");
     setEndDate("");
+    setNote("");
     setAdding(false);
   };
 
@@ -54,12 +68,12 @@ export function ConflictDatePicker({
 
   return (
     <div>
-      <label className="block text-xs font-semibold text-curtain-700 tracking-wide mb-2">
-        Scheduling Conflicts
-      </label>
-      <p className="text-xs text-clay-400 mb-3">
-        Mark any dates you&apos;re unavailable between rehearsals and performances.
-      </p>
+      {label && (
+        <label className="block text-xs font-semibold text-curtain-700 tracking-wide mb-2">
+          {label}
+        </label>
+      )}
+      {hint && <p className="text-xs text-clay-400 mb-3">{hint}</p>}
 
       {/* Conflict chips */}
       {conflicts.length > 0 && (
@@ -120,6 +134,21 @@ export function ConflictDatePicker({
               />
             </div>
           </div>
+          {withNote && (
+            <div className="mb-3">
+              <label className="block text-[11px] font-medium text-clay-500 mb-1">
+                Note <span className="text-clay-400">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                maxLength={120}
+                placeholder='e.g. "work trip" or "kid’s recital"'
+                className="w-full px-3 py-2 text-sm rounded-lg border border-cream-300 bg-white focus:ring-2 focus:ring-curtain-200 focus:border-curtain-300 outline-none"
+              />
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <Button
               size="sm"
@@ -135,6 +164,7 @@ export function ConflictDatePicker({
                 setAdding(false);
                 setStartDate("");
                 setEndDate("");
+                setNote("");
               }}
             >
               Cancel

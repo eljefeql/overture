@@ -245,9 +245,20 @@ export type AuditionSignup = {
 export type ConflictRange = {
   startDate: string;
   endDate: string;
+  /** Row id (signup_conflicts or member_conflicts) — present on read-model
+   *  rows so the owner can remove one range; absent on form drafts. */
+  id?: ID;
+  /** Where the range came from: entered at audition signup, or added on the
+   *  Show Hub "My conflicts" card (member_conflicts, migration 025). */
+  source?: "signup" | "member";
+  /** Optional note — hub-added ranges only. */
+  note?: string | null;
 };
 
-/** One person's structured conflicts for a show — Conflict Calendar read model. */
+/** One person's structured conflicts for a show — Conflict Calendar read model.
+ *  Since migration 025 this is the UNION of audition-signup ranges and ranges
+ *  the member added on the hub; a person who never auditioned (precast cast,
+ *  production team) gets a synthetic `signupId` of `member:<userId>`. */
 export type ShowConflictEntry = {
   signupId: ID;
   actorId: ID;
@@ -255,6 +266,9 @@ export type ShowConflictEntry = {
   actorEmail: string | null;
   status: SignupStatus;
   ranges: ConflictRange[];
+  /** Set when the person has NO audition signup for this show — `cast` =
+   *  accepted cast member, `team` = production team member. */
+  memberKind?: "cast" | "team";
 };
 
 export type TeamNote = {

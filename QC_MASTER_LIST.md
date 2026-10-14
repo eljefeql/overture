@@ -28,7 +28,7 @@ findings (3), Fiddler population findings (2), carried infrastructure. Status mo
 | 14 | Volunteer needs: multiple roles per date/event | Group shifts under an event (Set build Saturday → carpentry/painters/misc). Schema addition likely (019 or 020). |
 | 15 | Hub: contacts/People more prominent | Reorder sections; People/Who-to-Contact above or beside schedule. |
 | 16 | Who-to-Contact edit modal is crowded | UX cleanup. |
-| 17 | Rehearsal add/edit: surface conflicts | Show known cast conflicts (signup_conflicts) + existing absences for the chosen date while scheduling. |
+| 17 | ✅ 2026-10-13 — Rehearsal add/edit: surface conflicts (via #29) | Show known cast conflicts (signup_conflicts) + existing absences for the chosen date while scheduling. |
 | 18 | Declined offers vanish from history when refilled | From population run: refill forces declined→withdrawn; tracker loses the decline. Keep history (status or audit trail). |
 | 19 | ✅ 2026-10-13 — resolved via supplemental calls (the intentional UI path) | Adding a cast member after publish works via API; make the UI path intentional (ties into #12). |
 | 24 | Theatre affiliations (EMACT, AACT…) | ✅ 2026-10-13 — orgs.affiliations (mig 022), chips + public badges. Chips on org edit + public theatre page. Small; text/multi-select, no directory integration needed. |
@@ -61,7 +61,7 @@ findings (3), Fiddler population findings (2), carried infrastructure. Status mo
 
 | # | Item | Notes |
 |---|---|---|
-| 29 | Hub "My conflicts" (living cast conflict list) + conflict-aware scheduling (absorbs #17) | IN PROGRESS — migration 025. Cast add/remove date ranges on the Hub; union with audition conflicts feeds Conflict Calendar + rehearsal counts; "N people have conflicts that day" in the add-rehearsal modal. |
+| 29 | Hub "My conflicts" (living cast conflict list) + conflict-aware scheduling (absorbs #17) | ✅ 2026-10-13 (migration 025). Cast add/remove date ranges on the Hub; union with audition conflicts feeds Conflict Calendar + rehearsal counts; "N people have conflicts that day" in the add-rehearsal modal. |
 | 30 | Who to Contact rows carry real contact info | Team enters shareable phone/email per routing row; tappable inline. |
 | 31 | People section rebuilt: team first, prominent cards; cast as compact headshot grid, principals above ensemble | Kills the right-side whitespace. |
 | 32 | Contact flow rethink ("HOLY SHIT YES") | Mobile: tel:/sms: natural taps. Desktop: copy-to-clipboard. NEW "Send a note" to any team member → in-app notification + email via Resend (reply-to sender). Seed of per-show messaging. |
