@@ -84,14 +84,17 @@ export default function JoinInvitePage() {
   // no question to ask, just join.
   useEffect(() => {
     if (!user || !invite || autoAccepted.current) return;
-    if (invite.status === "pending" && (invite.viewerMatches || invite.viewerIsMember)) {
-      autoAccepted.current = true;
-      void accept();
-    }
-    if (invite.status === "accepted" && invite.viewerIsMember) {
+    // Already a member (e.g. the admin opening a link they copied): never
+    // touch the invite — it belongs to someone else. Just go to the theatre.
+    if (invite.viewerIsMember) {
       autoAccepted.current = true;
       selectOrgForUser(user.id, invite.orgId);
       router.replace("/org");
+      return;
+    }
+    if (invite.status === "pending" && invite.viewerMatches) {
+      autoAccepted.current = true;
+      void accept();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, invite]);

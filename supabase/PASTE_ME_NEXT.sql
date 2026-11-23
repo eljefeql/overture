@@ -117,14 +117,9 @@ BEGIN
     RAISE EXCEPTION 'This invite link isn''t valid.';
   END IF;
 
-  -- Already a member (by this or any route) → make sure the invite is
-  -- closed out and return quietly.
+  -- Already a member (by this or any route) → return quietly and leave the
+  -- invite alone: an admin opening a link they copied must not burn it.
   IF EXISTS (SELECT 1 FROM org_members WHERE org_id = v_invite.org_id AND user_id = v_user) THEN
-    IF v_invite.status = 'pending' THEN
-      UPDATE org_invites
-      SET status = 'accepted', accepted_by = v_user, accepted_at = now()
-      WHERE id = v_invite.id;
-    END IF;
     RETURN v_invite.org_id;
   END IF;
 
