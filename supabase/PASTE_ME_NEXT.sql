@@ -1,127 +1,52 @@
 -- ============================================================================
--- Overture 2.0 — Migration 027: Volunteer events → shifts → roles
+-- Overture 2.0 — Migration 028: Tokened invite links + no silent expiry
 -- ============================================================================
--- QC Master List #14 (owner request 2026-10-13): "If someone posts a
--- volunteer opportunity it should have the option to add time slots and
--- roles. For example, set shop might run 9am–3pm, but have two shifts and
--- each shift has carpentry or painting."
+-- Prod incident 2026-11-23: a theatre invited a real person; the invite email
+-- sat unsent for weeks (RESEND_FROM), by the time it went out the invite had
+-- auto-expired (14-day default), so her sign-in claimed nothing, she was
+-- walked through "create your theatre", and her theatre never appeared.
+-- Email-matching was the ONLY join mechanism, and it had three silent
+-- failure modes: expiry, a different sign-up address, and a claim that ran
+-- fire-and-forget before the screens that needed it.
 --
--- Model: EVENT (Set build Saturday · date · location · notes)
---          → SHIFTS (9:00–12:00 "Morning", 12:00–3:00 "Afternoon")
---            → ROLES (Carpentry ×3, Painting ×2, Misc ×2)
+-- This migration makes joining a theatre bulletproof:
 --
---   A ROLE IS A `volunteer_needs` ROW. The existing needs table gains three
---   nullable columns (event_id, shift_id, role_label); legacy standalone
---   needs keep event_id NULL and behave exactly as before. Because roles are
---   needs, EVERYTHING downstream is untouched: volunteer_signups, the
---   capacity-checked claim_volunteer_slot RPC (incl. the anonymous guest
---   path, team notification + guest confirmation email from 011, and the
---   past-shift guard from 019), cancel tokens, cancel_volunteer_signup,
---   get_volunteer_signup_info, claim_volunteer_signups auto-link, and the
---   send-reminders T-24h volunteer scan.
---
---   DENORMALIZED AT WRITE TIME (by the app): a role need carries its shift's
---   start_time / end_time and the event's event_date, and its `label` is
---   composed as "<role> — <event title>" (e.g. "Carpentry — Set build
---   Saturday"). That is why the reminder scan, the RPC copy ("Robert signed
---   up for Carpentry — Set build Saturday — Sat Mar 6, 9:00 AM"), and the
---   cancel page all keep working with NO edge-function redeploy.
---
---   1. volunteer_events  — new table (RLS mirrors volunteer_needs:
---      production members read, show team writes; anon reads ONLY via RPC).
---   2. volunteer_shifts  — new table (show_id denormalized so RLS needs no
---      join; same policies).
---   3. volunteer_needs   — + event_id, shift_id (both ON DELETE CASCADE, so
---      deleting a shift/event removes its roles and their signups — the UI
---      warns and requires confirmation when signups exist), + role_label.
---   4. get_volunteer_page — REPLACED (same signature). Adds an `events`
---      array (id/title/date/location/notes + nested shifts) and
---      eventId/shiftId/roleLabel on each need so the anonymous public page
---      can render the grouped card. Still exposes NO personal information —
---      counts only, never who signed up.
---
--- Idempotent — safe to paste more than once.
--- Apply in: Supabase Dashboard → SQL Editor → paste → Run.
--- NOTE: after applying, PROD_SETUP.sql should be regenerated to include this
--- migration before the production project is set up.
+--   1. Invites no longer expire on their own (default 1 year, claim ignores
+--      the date). Time-expired rows are restored to pending. Revoked rows
+--      (status 'expired' with a future expires_at) stay revoked.
+--   2. Every invite is a LINK: /join/<invite id>. The id is an unguessable
+--      uuid; possessing the link proves possession of the invite. Works for
+--      any signed-in account, any email, any time — and the admin can copy
+--      it off the members list and text it, so email is never the only path.
+--   3. get_org_invite(id)  — anon-safe preview (theatre, inviter, role,
+--      masked email, whether the viewer's email matches).
+--   4. accept_org_invite(id) — claims THIS invite for the signed-in user
+--      regardless of email. Idempotent. Records accepted_by / accepted_at.
+--   5. claim_org_invites() — email path kept (no expiry; also matches the
+--      auth email, not just profiles.email).
+--   6. notify_org_invite — emails and in-app pings now link to /join/<id>.
 -- ============================================================================
 
+-- 1. Expiry ------------------------------------------------------------------
+ALTER TABLE public.org_invites
+  ALTER COLUMN expires_at SET DEFAULT (now() + interval '1 year');
 
--- ----------------------------------------------------------------------------
--- 1. volunteer_events
--- ----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS volunteer_events (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  show_id uuid NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
-  title text NOT NULL,
-  event_date date,
-  location text,
-  notes text,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_volunteer_events_show ON volunteer_events(show_id, event_date);
+ALTER TABLE public.org_invites
+  ADD COLUMN IF NOT EXISTS accepted_by uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS accepted_at timestamptz;
 
-ALTER TABLE volunteer_events ENABLE ROW LEVEL SECURITY;
+-- Restore invites that expired purely by time (never used, never revoked).
+UPDATE public.org_invites
+SET status = 'pending', expires_at = now() + interval '1 year'
+WHERE status = 'expired' AND expires_at <= now();
 
-DROP POLICY IF EXISTS "volunteer_events_member_read" ON volunteer_events;
-CREATE POLICY "volunteer_events_member_read" ON volunteer_events
-  FOR SELECT TO authenticated USING (is_production_member(show_id));
+-- Push out every still-pending invite so none can lapse.
+UPDATE public.org_invites
+SET expires_at = greatest(expires_at, now() + interval '1 year')
+WHERE status = 'pending';
 
-DROP POLICY IF EXISTS "volunteer_events_team_write" ON volunteer_events;
-CREATE POLICY "volunteer_events_team_write" ON volunteer_events
-  FOR ALL TO authenticated
-  USING (is_show_team(show_id)) WITH CHECK (is_show_team(show_id));
-
-
--- ----------------------------------------------------------------------------
--- 2. volunteer_shifts — time windows inside an event
--- ----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS volunteer_shifts (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  event_id uuid NOT NULL REFERENCES volunteer_events(id) ON DELETE CASCADE,
-  -- Denormalized from the event so RLS checks need no join.
-  show_id uuid NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
-  start_time timestamptz,
-  end_time timestamptz,
-  -- Optional friendly name: "Morning", "Afternoon", "Strike"
-  label text,
-  sort_order integer NOT NULL DEFAULT 0,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_volunteer_shifts_event ON volunteer_shifts(event_id, sort_order);
-CREATE INDEX IF NOT EXISTS idx_volunteer_shifts_show ON volunteer_shifts(show_id);
-
-ALTER TABLE volunteer_shifts ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "volunteer_shifts_member_read" ON volunteer_shifts;
-CREATE POLICY "volunteer_shifts_member_read" ON volunteer_shifts
-  FOR SELECT TO authenticated USING (is_production_member(show_id));
-
-DROP POLICY IF EXISTS "volunteer_shifts_team_write" ON volunteer_shifts;
-CREATE POLICY "volunteer_shifts_team_write" ON volunteer_shifts
-  FOR ALL TO authenticated
-  USING (is_show_team(show_id)) WITH CHECK (is_show_team(show_id));
-
-
--- ----------------------------------------------------------------------------
--- 3. volunteer_needs — a role inside a shift is a need with these set.
---    Legacy standalone needs: all three NULL, nothing changes for them.
--- ----------------------------------------------------------------------------
-ALTER TABLE volunteer_needs
-  ADD COLUMN IF NOT EXISTS event_id uuid REFERENCES volunteer_events(id) ON DELETE CASCADE,
-  ADD COLUMN IF NOT EXISTS shift_id uuid REFERENCES volunteer_shifts(id) ON DELETE CASCADE,
-  ADD COLUMN IF NOT EXISTS role_label text;
-
-CREATE INDEX IF NOT EXISTS idx_volunteer_needs_event ON volunteer_needs(event_id);
-CREATE INDEX IF NOT EXISTS idx_volunteer_needs_shift ON volunteer_needs(shift_id);
-
-
--- ----------------------------------------------------------------------------
--- 4. get_volunteer_page — REPLACED (011 body + grouping). Anon-safe: show
---    header, events (title/date/location/notes/shifts), and needs with
---    filled COUNTS. Never names, never emails.
--- ----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.get_volunteer_page(p_show_id uuid)
+-- 2. Anyone (incl. anon) may read a single invite by id -----------------------
+CREATE OR REPLACE FUNCTION public.get_org_invite(p_invite_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
 STABLE
@@ -129,79 +54,249 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_show jsonb;
-  v_needs jsonb;
-  v_events jsonb;
+  v_invite record;
+  v_org record;
+  v_inviter text;
+  v_viewer_email text;
+  v_local text;
+  v_domain text;
 BEGIN
-  SELECT jsonb_build_object(
-    'id', s.id,
-    'title', s.title,
-    'orgName', o.name,
-    'posterUrl', s.poster_url,
-    'city', s.city,
-    'state', s.state,
-    'showOpen', s.show_open,
-    'showClose', s.show_close,
-    'performanceLocation', s.performance_location
-  )
-  INTO v_show
-  FROM shows s
-  JOIN orgs o ON o.id = s.org_id
-  WHERE s.id = p_show_id;
-
-  IF v_show IS NULL THEN
+  SELECT * INTO v_invite FROM org_invites WHERE id = p_invite_id;
+  IF v_invite IS NULL THEN
     RETURN NULL;
   END IF;
+  SELECT id, name, slug INTO v_org FROM orgs WHERE id = v_invite.org_id;
+  SELECT display_name INTO v_inviter FROM profiles WHERE id = v_invite.invited_by;
 
-  SELECT coalesce(jsonb_agg(need ORDER BY (need->>'eventDate') NULLS LAST, need->>'label'), '[]'::jsonb)
-  INTO v_needs
-  FROM (
-    SELECT jsonb_build_object(
-      'id', n.id,
-      'label', n.label,
-      'eventDate', n.event_date,
-      'startTime', n.start_time,
-      'endTime', n.end_time,
-      'slots', n.slots,
-      'notes', n.notes,
-      'eventId', n.event_id,
-      'shiftId', n.shift_id,
-      'roleLabel', n.role_label,
-      'filled', (
-        SELECT count(*) FROM volunteer_signups vs
-        WHERE vs.need_id = n.id AND vs.status = 'confirmed'
+  v_viewer_email := lower(coalesce(auth.jwt() ->> 'email', ''));
+  v_local  := split_part(v_invite.email, '@', 1);
+  v_domain := split_part(v_invite.email, '@', 2);
+
+  RETURN jsonb_build_object(
+    'id',            v_invite.id,
+    'orgId',         v_org.id,
+    'orgName',       v_org.name,
+    'orgSlug',       v_org.slug,
+    'role',          v_invite.role,
+    'invitedName',   v_invite.invited_name,
+    'inviterName',   nullif(btrim(coalesce(v_inviter, '')), ''),
+    'status',        v_invite.status,
+    -- "c•••@gmail.com": enough for the person to recognise it, nothing to leak.
+    'emailHint',     left(v_local, 1) || '•••@' || v_domain,
+    'viewerMatches', (v_viewer_email <> '' AND v_viewer_email = lower(v_invite.email)),
+    'viewerIsMember', (
+      auth.uid() IS NOT NULL AND EXISTS (
+        SELECT 1 FROM org_members WHERE org_id = v_invite.org_id AND user_id = auth.uid()
       )
-    ) AS need
-    FROM volunteer_needs n
-    WHERE n.show_id = p_show_id
-  ) sub;
-
-  SELECT coalesce(jsonb_agg(ev ORDER BY (ev->>'eventDate') NULLS LAST, ev->>'title'), '[]'::jsonb)
-  INTO v_events
-  FROM (
-    SELECT jsonb_build_object(
-      'id', e.id,
-      'title', e.title,
-      'eventDate', e.event_date,
-      'location', e.location,
-      'notes', e.notes,
-      'shifts', (
-        SELECT coalesce(jsonb_agg(jsonb_build_object(
-          'id', sh.id,
-          'eventId', sh.event_id,
-          'startTime', sh.start_time,
-          'endTime', sh.end_time,
-          'label', sh.label
-        ) ORDER BY sh.sort_order, sh.start_time NULLS LAST), '[]'::jsonb)
-        FROM volunteer_shifts sh WHERE sh.event_id = e.id
-      )
-    ) AS ev
-    FROM volunteer_events e
-    WHERE e.show_id = p_show_id
-  ) sub;
-
-  RETURN jsonb_build_object('show', v_show, 'needs', v_needs, 'events', v_events);
+    )
+  );
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.get_volunteer_page(uuid) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_org_invite(uuid) TO anon, authenticated;
+
+-- 3. Accept THIS invite for the signed-in user, whatever their email ----------
+CREATE OR REPLACE FUNCTION public.accept_org_invite(p_invite_id uuid)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_user uuid := auth.uid();
+  v_invite record;
+  v_name text;
+  v_email text;
+BEGIN
+  IF v_user IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT * INTO v_invite FROM org_invites WHERE id = p_invite_id FOR UPDATE;
+  IF v_invite IS NULL THEN
+    RAISE EXCEPTION 'This invite link isn''t valid.';
+  END IF;
+
+  -- Already a member (by this or any route) → make sure the invite is
+  -- closed out and return quietly.
+  IF EXISTS (SELECT 1 FROM org_members WHERE org_id = v_invite.org_id AND user_id = v_user) THEN
+    IF v_invite.status = 'pending' THEN
+      UPDATE org_invites
+      SET status = 'accepted', accepted_by = v_user, accepted_at = now()
+      WHERE id = v_invite.id;
+    END IF;
+    RETURN v_invite.org_id;
+  END IF;
+
+  IF v_invite.status = 'accepted' AND v_invite.accepted_by IS NOT NULL
+     AND v_invite.accepted_by <> v_user THEN
+    RAISE EXCEPTION 'This invite link has already been used by someone else. Ask the theatre to send a new one.';
+  END IF;
+  IF v_invite.status = 'expired' THEN
+    RAISE EXCEPTION 'This invite was cancelled by the theatre. Ask them to send a new one.';
+  END IF;
+
+  INSERT INTO org_members (org_id, user_id, role, invited_by)
+  VALUES (v_invite.org_id, v_user, v_invite.role, v_invite.invited_by)
+  ON CONFLICT (org_id, user_id) DO NOTHING;
+
+  UPDATE org_invites
+  SET status = 'accepted', accepted_by = v_user, accepted_at = now()
+  WHERE id = v_invite.id;
+
+  -- Tell the inviter.
+  SELECT display_name, email INTO v_name, v_email FROM profiles WHERE id = v_user;
+  IF v_invite.invited_by IS NOT NULL AND v_invite.invited_by <> v_user THEN
+    INSERT INTO notifications (user_id, type, title, body, link_url)
+    VALUES (
+      v_invite.invited_by,
+      'system',
+      'Invite Accepted',
+      coalesce(nullif(v_name, ''), v_email, 'Someone') || ' joined your theatre.',
+      '/org'
+    );
+  END IF;
+
+  RETURN v_invite.org_id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.accept_org_invite(uuid) TO authenticated;
+
+-- 4. Email-match claim: no expiry, matches the auth email too ----------------
+CREATE OR REPLACE FUNCTION public.claim_org_invites()
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_user uuid := auth.uid();
+  v_email text;
+  v_auth_email text;
+  v_name text;
+  v_invite record;
+  v_claimed integer := 0;
+BEGIN
+  IF v_user IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT email, display_name INTO v_email, v_name FROM profiles WHERE id = v_user;
+  v_auth_email := auth.jwt() ->> 'email';
+  IF v_email IS NULL AND v_auth_email IS NULL THEN
+    RETURN 0;
+  END IF;
+
+  FOR v_invite IN
+    SELECT * FROM org_invites
+    WHERE status = 'pending'
+      AND (lower(email) = lower(coalesce(v_email, ''))
+           OR lower(email) = lower(coalesce(v_auth_email, '')))
+  LOOP
+    INSERT INTO org_members (org_id, user_id, role, invited_by)
+    VALUES (v_invite.org_id, v_user, v_invite.role, v_invite.invited_by)
+    ON CONFLICT (org_id, user_id) DO NOTHING;
+
+    UPDATE org_invites
+    SET status = 'accepted', accepted_by = v_user, accepted_at = now()
+    WHERE id = v_invite.id;
+    v_claimed := v_claimed + 1;
+
+    IF v_invite.invited_by IS NOT NULL AND v_invite.invited_by <> v_user THEN
+      INSERT INTO notifications (user_id, type, title, body, link_url)
+      VALUES (
+        v_invite.invited_by,
+        'system',
+        'Invite Accepted',
+        coalesce(nullif(v_name, ''), v_email, v_auth_email) || ' joined your theatre.',
+        '/org'
+      );
+    END IF;
+  END LOOP;
+
+  RETURN v_claimed;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.claim_org_invites() TO authenticated;
+
+-- 5. Invite notifications link to the tokened join page ----------------------
+CREATE OR REPLACE FUNCTION public.notify_org_invite(p_invite_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_invite record;
+  v_recipient uuid;
+  v_org_name text;
+  v_inviter text;
+  v_link text;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT * INTO v_invite FROM org_invites WHERE id = p_invite_id;
+  IF v_invite IS NULL OR v_invite.status <> 'pending' THEN
+    RETURN;
+  END IF;
+  IF NOT is_org_admin(v_invite.org_id) THEN
+    RAISE EXCEPTION 'Only org admins can send invite notifications';
+  END IF;
+
+  SELECT name INTO v_org_name FROM orgs WHERE id = v_invite.org_id;
+  SELECT display_name INTO v_inviter
+    FROM profiles WHERE id = coalesce(v_invite.invited_by, auth.uid());
+  v_link := '/join/' || v_invite.id::text;
+
+  SELECT id INTO v_recipient
+    FROM profiles WHERE lower(email) = lower(v_invite.email);
+
+  IF v_recipient IS NOT NULL THEN
+    -- Existing Overture user → in-app notification (emails via the
+    -- notifications webhook). Clicking it accepts the invite.
+    INSERT INTO notifications (user_id, type, title, body, link_url)
+    VALUES (
+      v_recipient,
+      'system',
+      'Theatre Invitation',
+      coalesce(nullif(btrim(coalesce(v_inviter, '')), ''), 'Someone') ||
+        ' invited you to join ' || coalesce(v_org_name, 'a theatre') ||
+        '. Open this to accept.',
+      v_link
+    );
+  ELSE
+    -- No account yet → queue a real invite email. Sent by the send-reminders
+    -- cron via Resend (≤15 min). The dedupe_key makes repeat calls harmless.
+    INSERT INTO guest_emails
+      (to_email, to_name, subject, body, show_title, kind, link_url, dedupe_key)
+    VALUES (
+      lower(v_invite.email),
+      nullif(btrim(coalesce(v_invite.invited_name, '')), ''),
+      coalesce(nullif(btrim(coalesce(v_inviter, '')), ''), 'Someone') ||
+        ' invited you to join ' || coalesce(v_org_name, 'a theatre') || ' on Overture',
+      coalesce(nullif(btrim(coalesce(v_inviter, '')), ''), 'Someone') ||
+        ' added you to ' || coalesce(v_org_name, 'their theatre') ||
+        ' on Overture — the app ' || coalesce(v_org_name, 'the theatre') ||
+        ' uses to organize auditions, casting, and show communication.' ||
+        ' Use the button below to accept: create a free account (any email' ||
+        ' address is fine) or sign in, and you''ll be added to the theatre.',
+      NULL,
+      'org_invite',
+      v_link,
+      'org_invite:' || v_invite.id
+    )
+    ON CONFLICT (dedupe_key) DO NOTHING;
+  END IF;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.notify_org_invite(uuid) TO authenticated;
+
+-- 6. Pending invite emails already queued (not yet sent) get the new link ----
+UPDATE public.guest_emails g
+SET link_url = '/join/' || replace(g.dedupe_key, 'org_invite:', '')
+WHERE g.kind = 'org_invite' AND g.status = 'pending';

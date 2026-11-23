@@ -24,7 +24,9 @@ import {
   getOrgPhotos,
   addOrgPhoto,
   deleteOrgPhoto,
+  orgInviteLink,
 } from "@/lib/api/client";
+import { copyText } from "@/lib/share";
 import {
   getOrgPastProductions,
   createOrgPastProduction,
@@ -76,6 +78,7 @@ import {
   Camera,
   MaskHappy,
   X,
+  LinkSimple,
 } from "@phosphor-icons/react";
 import type { OrgMember, ShowTeamMember, Show, Venue, OrgLeader, OrgPhoto, SpaceType, OrgPastProduction } from "@/types";
 
@@ -380,11 +383,10 @@ export default function TheatreHubPage() {
         <p className="text-xs text-clay-500 mb-3">
           Members belong to the theatre itself. Admins can manage the theatre and create
           shows; members see the theatre and join productions they&apos;re added to.
-          Inviting someone saves the invite under their email — they join automatically
-          the next time they sign in with it.{" "}
+          Every invite is a link: whoever opens it joins, with any account or email.{" "}
           {isSupabaseConfigured
-            ? "New to Overture? They'll get an email invitation (usually within 15 minutes) with a link to create their account."
-            : "(Demo mode doesn't send invite emails, so give them a heads-up.)"}
+            ? "New people get it by email (usually within 15 minutes); existing Overture users see it in the app. Didn't arrive? Copy the link off their pending row and text it to them."
+            : "(Demo mode doesn't send invite emails — copy the link off their pending row and send it yourself.)"}
         </p>
         <div className="flex flex-col gap-3">
           {(members ?? []).map((member) =>
@@ -431,6 +433,26 @@ export default function TheatreHubPage() {
                     <Badge variant="gold" size="sm">Owner</Badge>
                   ) : (
                     <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {member.status === "invited" && (
+                        <button
+                          onClick={async () => {
+                            const ok = await copyText(
+                              orgInviteLink(member.id.replace(/^invite:/, ""))
+                            );
+                            toast(
+                              ok ? "success" : "error",
+                              ok
+                                ? `Invite link copied — text or email it to ${member.name}.`
+                                : "Couldn't copy. Try again."
+                            );
+                          }}
+                          className="h-8 px-2.5 flex items-center gap-1.5 rounded-lg text-xs font-semibold text-curtain-700 hover:bg-cream-100 transition-colors"
+                          aria-label={`Copy invite link for ${member.name}`}
+                        >
+                          <LinkSimple className="w-4 h-4" weight="bold" />
+                          <span className="hidden sm:inline">Copy link</span>
+                        </button>
+                      )}
                       <select
                         value={member.role}
                         onChange={(e) =>
@@ -786,7 +808,10 @@ function InviteMemberModal({
     onSuccess: () => {
       track("org_invite_sent", { orgId });
       queryClient.invalidateQueries({ queryKey: ["orgMembers", orgId] });
-      toast("success", `Invite recorded for ${name.trim()}.`);
+      toast(
+        "success",
+        `Invite sent to ${name.trim()}. Their join link is on the members list if you'd rather text it.`
+      );
       setName("");
       setEmail("");
       setRole("member");
@@ -835,11 +860,12 @@ function InviteMemberModal({
         <div className="flex items-start gap-2 p-3 rounded-xl bg-cream-50 border border-cream-200">
           <EnvelopeSimple className="w-4 h-4 text-stage-500 flex-shrink-0 mt-0.5" weight="duotone" />
           <p className="text-[11px] text-clay-500 leading-relaxed">
-            They&apos;ll appear as pending, and anyone who signs in or signs up with this
-            email joins automatically.{" "}
+            They&apos;ll appear as pending with a join link you can copy and send
+            yourself any time. Whoever opens the link joins — any account, any
+            email — and signing in with this exact email also joins automatically.{" "}
             {isSupabaseConfigured
               ? "If they already use Overture they'll see the invite in the app; if they're new, an email invitation goes out within about 15 minutes."
-              : "Demo mode doesn't send invite emails — let them know directly."}
+              : "Demo mode doesn't send invite emails — copy the link and send it directly."}
           </p>
         </div>
       </div>

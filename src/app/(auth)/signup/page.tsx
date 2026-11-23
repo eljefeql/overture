@@ -84,7 +84,10 @@ function SignupContent() {
       return;
     }
     try {
-      const result = await signUp(email.trim(), password);
+      const result = await signUp(email.trim(), password, {
+        returnTo: next,
+        pathHint: pathHint === "actor" || pathHint === "maker" ? pathHint : null,
+      });
       track("signup_completed");
       if (result.needsEmailConfirmation) {
         setAwaitingConfirmation(true);

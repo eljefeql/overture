@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/features/auth/AuthContext";
 import {
+  claimPendingInvites,
   createActorProfile,
   createOrg,
   createOrgLeader,
@@ -173,6 +174,9 @@ function OnboardingWizard() {
   const invitesQuery = useQuery({
     queryKey: ["myPendingInvites", user?.id],
     queryFn: async (): Promise<PendingOrgInvite[]> => {
+      // Sign-in/restore fire the claim without awaiting it — finish it here
+      // so a just-confirmed invitee's membership exists before we look.
+      await claimPendingInvites();
       const [pending, memberships] = await Promise.all([
         getMyPendingInvites(),
         getMyOrgMemberships(user?.id ?? "").catch(() => []),

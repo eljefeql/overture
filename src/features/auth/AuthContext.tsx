@@ -30,7 +30,12 @@ type AuthState = {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<User | null>;
-  signUp: (email: string, password: string) => Promise<SignUpResult>;
+  /** `returnTo` survives email confirmation: the confirm link lands on /auth/callback, which reads it back. */
+  signUp: (
+    email: string,
+    password: string,
+    opts?: { returnTo?: string | null; pathHint?: string | null }
+  ) => Promise<SignUpResult>;
   /** `returnParams` (e.g. next/path) ride through the OAuth round-trip to /auth/callback. */
   loginWithGoogle: (returnParams?: Record<string, string>) => Promise<User | null>;
   logout: () => void;
@@ -105,6 +110,31 @@ async function fetchProfileUser(userId: string): Promise<User | null> {
     .maybeSingle();
   if (error) throw new Error(error.message);
   return data ? profileRowToUser(data) : null;
+}
+
+// ── Post-auth return target (survives email confirmation + OAuth) ──
+const AUTH_RETURN_KEY = "overture.authReturn";
+export type AuthReturn = { next: string | null; path: string | null };
+
+export function stashAuthReturn(v: AuthReturn) {
+  try {
+    if (!v.next && !v.path) localStorage.removeItem(AUTH_RETURN_KEY);
+    else localStorage.setItem(AUTH_RETURN_KEY, JSON.stringify(v));
+  } catch {
+    /* ignore */
+  }
+}
+/** Read and clear the stashed target (one-shot). */
+export function takeAuthReturn(): AuthReturn {
+  try {
+    const raw = localStorage.getItem(AUTH_RETURN_KEY);
+    localStorage.removeItem(AUTH_RETURN_KEY);
+    if (!raw) return { next: null, path: null };
+    const v = JSON.parse(raw) as Partial<AuthReturn>;
+    return { next: v.next ?? null, path: v.path ?? null };
+  } catch {
+    return { next: null, path: null };
+  }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -208,13 +238,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signUp = useCallback(
-    async (email: string, password: string): Promise<SignUpResult> => {
+    async (
+      email: string,
+      password: string,
+      opts?: { returnTo?: string | null; pathHint?: string | null }
+    ): Promise<SignUpResult> => {
       if (isSupabaseConfigured) {
         setIsLoading(true);
         try {
+          // The confirmation email's link must come BACK to the app with the
+          // deep-link intact (an invite's /join/<id>, a gated page). The
+          // return target is stashed locally and read by /auth/callback —
+          // no query string on the redirect, so the Auth redirect allow-list
+          // never has to know about it.
+          stashAuthReturn({ next: opts?.returnTo ?? null, path: opts?.pathHint ?? null });
           const { data, error } = await getSupabase().auth.signUp({
             email,
             password,
+            options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
           });
           if (error) throw new Error(error.message);
           // Email confirmation ON → user created but no session yet.
@@ -272,9 +313,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (e instanceof Error && /isn't enabled/.test(e.message)) throw e;
         // Settings unreachable — proceed; the authorize endpoint decides.
       }
-      // Keep the deep-link (invite emails send /signup?next=/org) and the
-      // landing-page role hint alive across the Google round-trip — the
-      // callback reads them back and routes like a password sign-in would.
+      // Keep the deep-link (invite links are /join/<id>) and the landing-page
+      // role hint alive across the Google round-trip. Stashed locally AND
+      // put on the callback URL; the callback prefers the URL and falls back
+      // to the stash (some providers/allow-lists strip query strings).
+      stashAuthReturn({
+        next: returnParams?.next ?? null,
+        path: returnParams?.path ?? null,
+      });
       const qs = new URLSearchParams(
         Object.entries(returnParams ?? {}).filter(([, v]) => !!v)
       ).toString();

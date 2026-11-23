@@ -49,6 +49,7 @@ const delay = (ms = 200) => new Promise((r) => setTimeout(r, ms));
 // everything else still uses the mock layer below.
 // ============================================================
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
+import { publicShareUrl } from "@/lib/share";
 import { geocodeCityState, geocodeAddress } from "@/lib/geocode";
 import { haversineMiles } from "@/lib/utils";
 
@@ -562,6 +563,105 @@ export async function getHomeRoute(userId: string): Promise<string> {
   return "/discover";
 }
 
+// ─── Tokened invite links (migration 028) ────────────────────────────────────
+// /join/<inviteId> is the one join path that cannot silently fail: it works
+// for any signed-in account (any email), never expires, and the admin can
+// copy it off the members list and text it. Email matching is kept as a
+// convenience on top.
+
+const PENDING_INVITE_KEY = "overture.pendingInviteId";
+
+/** Remember a /join link the visitor opened before they had a session. */
+export function rememberPendingInvite(inviteId: string) {
+  try {
+    localStorage.setItem(PENDING_INVITE_KEY, inviteId);
+  } catch {
+    /* private mode etc. — the next param still carries it */
+  }
+}
+export function readPendingInvite(): string | null {
+  try {
+    return localStorage.getItem(PENDING_INVITE_KEY);
+  } catch {
+    return null;
+  }
+}
+export function forgetPendingInvite() {
+  try {
+    localStorage.removeItem(PENDING_INVITE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Absolute, shareable join link for an invite id. */
+export function orgInviteLink(inviteId: string): string {
+  return publicShareUrl(`/join/${inviteId}`);
+}
+
+export interface OrgInvitePreview {
+  id: string;
+  orgId: string;
+  orgName: string;
+  orgSlug: string | null;
+  role: OrgMember["role"];
+  invitedName: string | null;
+  inviterName: string | null;
+  status: "pending" | "accepted" | "expired";
+  emailHint: string;
+  viewerMatches: boolean;
+  viewerIsMember: boolean;
+}
+
+/**
+ * Anon-safe invite preview (get_org_invite RPC). null = no such invite.
+ * Throws on transport errors so the page can say "try again" honestly.
+ */
+export async function getOrgInvite(inviteId: string): Promise<OrgInvitePreview | null> {
+  if (!isSupabaseConfigured) {
+    const mock = orgMembers.find((m) => m.id === inviteId && m.status === "invited");
+    const org = mock ? orgs.find((o) => o.id === mock.orgId) : null;
+    if (!mock || !org) return null;
+    return {
+      id: mock.id,
+      orgId: org.id,
+      orgName: org.name,
+      orgSlug: org.slug,
+      role: mock.role,
+      invitedName: mock.name,
+      inviterName: "Jordan Ellery",
+      status: "pending",
+      emailHint: `${mock.email[0]}•••@${mock.email.split("@")[1]}`,
+      viewerMatches: false,
+      viewerIsMember: false,
+    };
+  }
+  const { data, error } = await getSupabase().rpc("get_org_invite", {
+    p_invite_id: inviteId,
+  });
+  if (error) throw new Error(error.message);
+  return (data as OrgInvitePreview | null) ?? null;
+}
+
+/**
+ * Accept a specific invite for the signed-in user (accept_org_invite RPC).
+ * Returns the org id joined. Throws with a human message when the link was
+ * already used by someone else or cancelled.
+ */
+export async function acceptOrgInvite(inviteId: string): Promise<string> {
+  if (!isSupabaseConfigured) {
+    const mock = orgMembers.find((m) => m.id === inviteId);
+    if (!mock) throw new Error("This invite link isn't valid.");
+    mock.status = "active";
+    return mock.orgId;
+  }
+  const { data, error } = await getSupabase().rpc("accept_org_invite", {
+    p_invite_id: inviteId,
+  });
+  if (error) throw new Error(error.message);
+  return data as string;
+}
+
 export interface PendingOrgInvite {
   id: string;
   orgId: string;
@@ -635,6 +735,26 @@ export async function getMyPendingInvites(): Promise<PendingOrgInvite[]> {
 export async function claimPendingInvites(): Promise<number> {
   if (!isSupabaseConfigured) return 0;
 
+  // A /join link opened before sign-in is remembered in localStorage; accept
+  // it the moment a session exists — wherever the person ends up after
+  // email confirmation / Google / password. Best-effort, cleared on success
+  // or on a definitive "already used / cancelled" answer.
+  let claimedByLink = 0;
+  const pendingLink = readPendingInvite();
+  if (pendingLink) {
+    try {
+      await acceptOrgInvite(pendingLink);
+      claimedByLink = 1;
+      forgetPendingInvite();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Definitive answers: don't keep retrying forever. Transport/RPC-missing
+      // errors keep the id so a later sign-in can try again.
+      if (/already been used|cancelled|isn't valid/i.test(msg)) forgetPendingInvite();
+      console.warn("Invite link claim skipped:", msg);
+    }
+  }
+
   // Same email-match moment: attach any guest volunteer signups made with
   // this email before the account existed (claim_volunteer_signups RPC,
   // migration 011). Best-effort — never blocks the invite claim.
@@ -659,12 +779,12 @@ export async function claimPendingInvites(): Promise<number> {
     const { data, error } = await getSupabase().rpc("claim_org_invites");
     if (error) {
       console.warn("Org invite claim skipped:", error.message);
-      return 0;
+      return claimedByLink;
     }
-    return data ?? 0;
+    return (data ?? 0) + claimedByLink;
   } catch (e) {
     console.warn("Org invite claim skipped:", e);
-    return 0;
+    return claimedByLink;
   }
 }
 

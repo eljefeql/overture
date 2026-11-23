@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
-import { useAuth } from "@/features/auth/AuthContext";
+import { useAuth, takeAuthReturn } from "@/features/auth/AuthContext";
 import { getHomeRoute } from "@/lib/api/client";
 import { CircleNotch } from "@phosphor-icons/react";
 
@@ -25,9 +25,18 @@ function CallbackInner() {
     params.get("error_description") ?? params.get("error");
 
   // Carried through the OAuth round-trip by loginWithGoogle (same deep-link
-  // + role-hint semantics as the password login/signup pages).
-  const next = params.get("next");
-  const pathHint = params.get("path");
+  // + role-hint semantics as the password login/signup pages). The stash
+  // covers the email-confirmation link and any provider that drops the
+  // query string. Read once per mount.
+  const [ret] = useState(() => {
+    const stash = typeof window !== "undefined" ? takeAuthReturn() : { next: null, path: null };
+    return {
+      next: params.get("next") ?? stash.next,
+      path: params.get("path") ?? stash.path,
+    };
+  });
+  const next = ret.next;
+  const pathHint = ret.path;
 
   useEffect(() => {
     if (providerError) return;
