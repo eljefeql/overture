@@ -31,7 +31,8 @@ type AuthState = {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<User | null>;
   signUp: (email: string, password: string) => Promise<SignUpResult>;
-  loginWithGoogle: () => Promise<User | null>;
+  /** `returnParams` (e.g. next/path) ride through the OAuth round-trip to /auth/callback. */
+  loginWithGoogle: (returnParams?: Record<string, string>) => Promise<User | null>;
   logout: () => void;
   switchRole: (role: AuthRole) => void;
   updateUser: (updates: Partial<User>) => void;
@@ -252,7 +253,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Simulated Google OAuth — stands in for Supabase Auth until the Google
   // provider is configured. In cloud mode the pages show a "coming soon"
   // toast instead of calling this; the simulated flow remains for mock mode.
-  const loginWithGoogle = useCallback(async () => {
+  const loginWithGoogle = useCallback(async (returnParams?: Record<string, string>) => {
     if (isSupabaseConfigured) {
       // Real OAuth: the browser leaves for Google and returns to
       // /auth/callback, where the session lands and routing happens.
@@ -271,9 +272,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (e instanceof Error && /isn't enabled/.test(e.message)) throw e;
         // Settings unreachable — proceed; the authorize endpoint decides.
       }
+      // Keep the deep-link (invite emails send /signup?next=/org) and the
+      // landing-page role hint alive across the Google round-trip — the
+      // callback reads them back and routes like a password sign-in would.
+      const qs = new URLSearchParams(
+        Object.entries(returnParams ?? {}).filter(([, v]) => !!v)
+      ).toString();
       const { error } = await getSupabase().auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: `${window.location.origin}/auth/callback` },
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback${qs ? `?${qs}` : ""}`,
+        },
       });
       if (error) {
         throw new Error(

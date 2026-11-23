@@ -538,6 +538,30 @@ export async function getOrgAccess(
   }
 }
 
+/**
+ * Where a signed-in, fully onboarded person should land when nothing more
+ * specific (a `next` deep-link) says otherwise. Theatre members who have NO
+ * actor profile go to their theatre — dropping an invited board member on
+ * the actor Discover feed read as "this is a blank new account". Anyone with
+ * an actor profile (or no memberships) keeps /discover. Mock mode: /discover.
+ */
+export async function getHomeRoute(userId: string): Promise<string> {
+  if (!isSupabaseConfigured) return "/discover";
+  try {
+    const supabase = getSupabase();
+    const [{ data: members }, { data: actorRole }] = await Promise.all([
+      supabase.from("org_members").select("id").eq("user_id", userId).limit(1),
+      supabase
+        .from("talent_roles").select("user_id")
+        .eq("user_id", userId).eq("role_type", "actor").maybeSingle(),
+    ]);
+    if ((members?.length ?? 0) > 0 && !actorRole) return "/org";
+  } catch {
+    // fall through
+  }
+  return "/discover";
+}
+
 export interface PendingOrgInvite {
   id: string;
   orgId: string;

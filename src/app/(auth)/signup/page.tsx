@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/features/auth/AuthContext";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { getHomeRoute } from "@/lib/api/client";
 import { Button, useToast } from "@/components/ui";
 import { track } from "@/lib/analytics";
 import { GoogleLogo, CircleNotch, EnvelopeSimple } from "@phosphor-icons/react";
@@ -49,14 +50,17 @@ function SignupContent() {
   async function handleGoogle() {
     setGoogleLoading(true);
     try {
-      const u = await loginWithGoogle();
+      const u = await loginWithGoogle({
+        ...(next ? { next } : {}),
+        ...(pathHint === "actor" || pathHint === "maker" ? { path: pathHint } : {}),
+      });
       // null = cloud mode, the browser is redirecting to Google —
       // keep the spinner until the page unloads.
       if (!u) return;
       if (u.onboardingStep !== "complete") {
         router.push(onboardingUrl);
       } else {
-        router.push(next ?? "/discover");
+        router.push(next ?? (await getHomeRoute(u.id)));
       }
     } catch (err) {
       setGoogleLoading(false);

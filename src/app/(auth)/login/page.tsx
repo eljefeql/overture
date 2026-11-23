@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/features/auth/AuthContext";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { getHomeRoute } from "@/lib/api/client";
 import { Button, useToast } from "@/components/ui";
 import { GoogleLogo, CircleNotch } from "@phosphor-icons/react";
 import type { User } from "@/types";
@@ -28,7 +29,7 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
 
-  function routeAfterAuth(u: User | null) {
+  async function routeAfterAuth(u: User | null) {
     // New users who haven't finished onboarding go to the wizard first,
     // carrying the deep-link so they land back where they started.
     if (u && u.onboardingStep !== "complete") {
@@ -39,7 +40,13 @@ function LoginForm() {
       router.push(next);
       return;
     }
-    router.push(u && !u.id.startsWith("user-team") ? "/discover" : "/shows");
+    if (!isSupabaseConfigured) {
+      router.push(u && !u.id.startsWith("user-team") ? "/discover" : "/shows");
+      return;
+    }
+    // Theatre members without an actor profile land on their theatre, not
+    // the actor Discover feed (which reads as an empty new account).
+    router.push(u ? await getHomeRoute(u.id) : "/discover");
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -60,7 +67,7 @@ function LoginForm() {
   async function handleGoogle() {
     setGoogleLoading(true);
     try {
-      const u = await loginWithGoogle();
+      const u = await loginWithGoogle(next ? { next } : undefined);
       // null = cloud mode, the browser is redirecting to Google —
       // keep the spinner until the page unloads.
       if (u) routeAfterAuth(u);

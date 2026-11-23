@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
 import { useAuth } from "@/features/auth/AuthContext";
+import { getHomeRoute } from "@/lib/api/client";
 import { CircleNotch } from "@phosphor-icons/react";
 
 /* ============================================================
@@ -23,13 +24,33 @@ function CallbackInner() {
   const providerError =
     params.get("error_description") ?? params.get("error");
 
+  // Carried through the OAuth round-trip by loginWithGoogle (same deep-link
+  // + role-hint semantics as the password login/signup pages).
+  const next = params.get("next");
+  const pathHint = params.get("path");
+
   useEffect(() => {
     if (providerError) return;
     if (user) {
-      router.replace(
-        user.onboardingStep !== "complete" ? "/onboarding" : "/discover"
-      );
-      return;
+      if (user.onboardingStep !== "complete") {
+        const qs = new URLSearchParams();
+        if (next) qs.set("next", next);
+        if (pathHint === "actor" || pathHint === "maker") qs.set("path", pathHint);
+        const s = qs.toString();
+        router.replace(`/onboarding${s ? `?${s}` : ""}`);
+        return;
+      }
+      if (next && next.startsWith("/")) {
+        router.replace(next);
+        return;
+      }
+      let cancelled = false;
+      getHomeRoute(user.id).then((dest) => {
+        if (!cancelled) router.replace(dest);
+      });
+      return () => {
+        cancelled = true;
+      };
     }
     if (!isLoading) {
       // Session not there yet — give the URL exchange a moment before
@@ -37,7 +58,7 @@ function CallbackInner() {
       const t = setTimeout(() => setTimedOut(true), 6000);
       return () => clearTimeout(t);
     }
-  }, [user, isLoading, providerError, router]);
+  }, [user, isLoading, providerError, router, next, pathHint]);
 
   if (providerError || timedOut) {
     return (
