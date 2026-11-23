@@ -39,14 +39,19 @@ supabase link --project-ref haptjelzekjdjerrditm
 
 ## 3. Set the secrets
 
+All THREE are required on every project (staging AND prod):
 ```bash
 supabase secrets set RESEND_API_KEY=re_your_key_here
 supabase secrets set APP_URL=https://your-deployed-app-url.com
-```
-Optional (after you verify a domain in Resend):
-```bash
 supabase secrets set RESEND_FROM="Overture <notifications@yourdomain.com>"
 ```
+**RESEND_FROM is not optional in practice.** Without it both edge functions fall
+back to Resend's sandbox sender (`onboarding@resend.dev`), which Resend only
+delivers to the Resend account owner's own address — every email to anyone
+else fails (guest_emails rows land in `status='failed'`). This bit prod on
+2026-11-23: invites silently failed for six weeks while the owner's own test
+emails worked. Re-queue after fixing with
+`UPDATE guest_emails SET status='pending', error=NULL WHERE status='failed';`.
 
 **Staging QA note:** while you're testing against the staging project with
 the app running locally, email links (invites, cancel links, etc.) are built
