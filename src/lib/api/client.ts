@@ -538,6 +538,70 @@ export async function getOrgAccess(
   }
 }
 
+export interface PendingOrgInvite {
+  id: string;
+  orgId: string;
+  orgName: string;
+  role: OrgMember["role"];
+  invitedName: string | null;
+  inviterName: string | null;
+  /** True when sign-in already claimed the invite (membership exists). */
+  alreadyMember?: boolean;
+}
+
+/**
+ * Pending, unexpired theatre invites addressed to the signed-in user's email
+ * (RLS: "Invited user can see their own invites", migration 002). Used by
+ * onboarding so an invited person is greeted with "X invited you to join Y"
+ * instead of the blank actor/maker fork. Best-effort: returns [] on any
+ * error or in mock mode.
+ */
+export async function getMyPendingInvites(): Promise<PendingOrgInvite[]> {
+  if (!isSupabaseConfigured) return [];
+  try {
+    const supabase = getSupabase();
+    // Filter by MY email explicitly: once sign-in has auto-claimed an invite
+    // and made me an org admin, RLS also shows me every invite for that org.
+    const { data: auth } = await supabase.auth.getUser();
+    const myEmail = auth.user?.email?.trim().toLowerCase();
+    if (!myEmail) return [];
+    const { data: rows, error } = await supabase
+      .from("org_invites")
+      .select("id, org_id, role, invited_name, invited_by")
+      .ilike("email", myEmail)
+      .eq("status", "pending")
+      .gt("expires_at", new Date().toISOString());
+    if (error || !rows?.length) return [];
+
+    const orgIds = Array.from(new Set(rows.map((r) => r.org_id)));
+    const inviterIds = Array.from(
+      new Set(rows.map((r) => r.invited_by).filter(Boolean))
+    ) as string[];
+    const [{ data: orgRows }, { data: inviterRows }] = await Promise.all([
+      supabase.from("orgs").select("id, name").in("id", orgIds),
+      inviterIds.length
+        ? supabase.from("profiles").select("id, display_name").in("id", inviterIds)
+        : Promise.resolve({ data: [] as { id: string; display_name: string | null }[] }),
+    ]);
+    const orgName = new Map((orgRows ?? []).map((o) => [o.id, o.name as string]));
+    const inviterName = new Map(
+      (inviterRows ?? []).map((p) => [p.id, (p.display_name as string | null) ?? null])
+    );
+    return rows
+      .filter((r) => orgName.has(r.org_id))
+      .map((r) => ({
+        id: r.id,
+        orgId: r.org_id,
+        orgName: orgName.get(r.org_id) ?? "a theatre",
+        role: r.role,
+        invitedName: r.invited_name ?? null,
+        inviterName: r.invited_by ? inviterName.get(r.invited_by) ?? null : null,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Claim any pending org invites matching the signed-in user's email via the
  * claim_org_invites SECURITY DEFINER RPC (migration 006). Creates org_members

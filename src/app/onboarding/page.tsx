@@ -2,10 +2,22 @@
 
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/features/auth/AuthContext";
-import { createActorProfile, createOrg, createOrgLeader, findSimilarOrgs } from "@/lib/api/client";
-import { completeActorOnboarding, completeMakerOnboarding } from "@/lib/api/onboarding";
+import {
+  createActorProfile,
+  createOrg,
+  createOrgLeader,
+  findSimilarOrgs,
+  getMyOrgMemberships,
+  getMyPendingInvites,
+  type PendingOrgInvite,
+} from "@/lib/api/client";
+import {
+  completeActorOnboarding,
+  completeInvitedOnboarding,
+  completeMakerOnboarding,
+} from "@/lib/api/onboarding";
 import { selectOrgForUser } from "@/features/auth/useOrg";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { track } from "@/lib/analytics";
@@ -28,6 +40,7 @@ import {
   Confetti,
   ShieldCheck,
   Lock,
+  Buildings,
 } from "@phosphor-icons/react";
 import type { Pronouns, TeamRole } from "@/types";
 
@@ -112,12 +125,23 @@ const PRIMARY_ROLE_OPTIONS: PrimaryRoleOption[] = PRIMARY_ROLE_GROUPS.flatMap(
 const ACTOR_STEPS = ["Profile", "Talent", "Private", "Done"];
 const MAKER_STEPS = ["You", "Theatre", "Done"];
 
-type Path = "actor" | "maker" | null;
+type Path = "actor" | "maker" | "invited" | null;
+
+const ORG_ROLE_LABEL: Record<string, string> = {
+  owner: "an owner",
+  admin: "an admin",
+  member: "a member",
+};
 
 export default function OnboardingPage() {
+  // On a hard load the session restores AFTER first render. The wizard seeds
+  // its name/pronoun fields from the user at mount, so wait for the restore
+  // and key on the user id — the prefills are then right on first paint.
+  const { user, isLoading } = useAuth();
+  if (isLoading) return null;
   return (
     <Suspense fallback={null}>
-      <OnboardingWizard />
+      <OnboardingWizard key={user?.id ?? "anon"} />
     </Suspense>
   );
 }
@@ -137,6 +161,42 @@ function OnboardingWizard() {
   );
   const [step, setStep] = useState(0);
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
+
+  // A theatre may have invited this email before the account existed. If so,
+  // the person is greeted with "X invited you to join Y" and joins in one
+  // step — never walked through "create your theatre". Cloud-only; mock mode
+  // and any lookup failure fall back to the normal fork.
+  // Two shapes of "invited": a still-pending invite, OR a membership that
+  // sign-in already auto-claimed (claimPendingInvites runs at login, before
+  // onboarding) — a brand-new account that confirmed email then signed in
+  // arrives here as a member with onboarding still incomplete.
+  const invitesQuery = useQuery({
+    queryKey: ["myPendingInvites", user?.id],
+    queryFn: async (): Promise<PendingOrgInvite[]> => {
+      const [pending, memberships] = await Promise.all([
+        getMyPendingInvites(),
+        getMyOrgMemberships(user?.id ?? "").catch(() => []),
+      ]);
+      const claimed: PendingOrgInvite[] = memberships
+        .filter((m) => !pending.some((p) => p.orgId === m.org.id))
+        .map((m) => ({
+          id: `member-${m.org.id}`,
+          orgId: m.org.id,
+          orgName: m.org.name,
+          role: m.role,
+          invitedName: null,
+          inviterName: null,
+          alreadyMember: true,
+        }));
+      return [...pending, ...claimed];
+    },
+    enabled: isSupabaseConfigured && !!user?.id && path === null,
+    staleTime: 60_000,
+  });
+  const pendingInvites = invitesQuery.data ?? [];
+  const [declinedInviteFlow, setDeclinedInviteFlow] = useState(false);
+  const showInvitedPath =
+    path === null && !declinedInviteFlow && pendingInvites.length > 0;
 
   // ── Shared identity ── (pre-filled from the auth provider, e.g. Google)
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
@@ -287,6 +347,43 @@ function OnboardingWizard() {
     onError: () => toast("error", "Something went wrong. Please try again."),
   });
 
+  const invitedMutation = useMutation({
+    mutationFn: () =>
+      completeInvitedOnboarding({
+        user: {
+          id: user?.id ?? "",
+          displayName: displayName.trim(),
+          pronouns: (pronouns as Pronouns) || null,
+        },
+      }),
+    onSuccess: () => {
+      updateUser({
+        displayName: displayName.trim(),
+        pronouns: (pronouns as Pronouns) || null,
+        onboardingStep: "complete",
+      });
+      // Make the theatre that invited them the ACTIVE one, and make sure
+      // useOrg sees the new membership before /org renders.
+      const first = pendingInvites[0];
+      if (user?.id && first) selectOrgForUser(user.id, first.orgId);
+      queryClient.invalidateQueries({ queryKey: ["myOrg"] });
+      queryClient.invalidateQueries({ queryKey: ["myPendingInvites"] });
+      const roleOption =
+        PRIMARY_ROLE_OPTIONS.find((o) => o.value === primaryRole) ??
+        PRIMARY_ROLE_OPTIONS[0];
+      switchRole({ type: "team", showId: "show-1", teamRole: roleOption.teamRole });
+      track("onboarding_completed", { path: "invited" });
+      router.push("/org");
+    },
+    onError: () => toast("error", "Something went wrong. Please try again."),
+  });
+
+  function submitInvited() {
+    setHasAttemptedSubmit(true);
+    if (!displayName.trim()) return;
+    invitedMutation.mutate();
+  }
+
   // ── Validation ──
   const actorProfileValid =
     displayName.trim() !== "" &&
@@ -340,6 +437,107 @@ function OnboardingWizard() {
         setStep(2);
       },
     });
+  }
+
+  // ════════════════════════════════════════════════
+  // INVITED PATH — "X invited you to join Y"
+  // ════════════════════════════════════════════════
+  // Hold the fork for a beat while we check for an invite, so an invited
+  // person never sees "I'm a theatre maker" flash first.
+  if (path === null && invitesQuery.isLoading) {
+    return <div className="max-w-2xl mx-auto px-6 py-12" aria-busy="true" />;
+  }
+
+  if (showInvitedPath) {
+    const invite = pendingInvites[0];
+    const extraCount = pendingInvites.length - 1;
+    return (
+      <div className="max-w-2xl mx-auto px-6 py-12">
+        <div className="text-center mb-8 animate-fade-up">
+          <div className="w-14 h-14 rounded-2xl bg-stage-100 flex items-center justify-center mx-auto mb-4">
+            <Buildings className="w-7 h-7 text-stage-600" weight="duotone" />
+          </div>
+          <h1 className="text-3xl font-display text-curtain-900 mb-2">
+            You&apos;re invited to {invite.orgName}
+          </h1>
+          <p className="text-sm text-clay-500 max-w-md mx-auto">
+            {invite.alreadyMember
+              ? `You've been added to ${invite.orgName} as ${ORG_ROLE_LABEL[invite.role] ?? "a member"}.`
+              : `${invite.inviterName ?? "Someone"} added you to ${invite.orgName} as ${ORG_ROLE_LABEL[invite.role] ?? "a member"}.`}
+            {extraCount > 0 &&
+              ` You also have ${extraCount} more theatre invite${extraCount === 1 ? "" : "s"} waiting.`}{" "}
+            Tell us how you&apos;d like to appear and you&apos;re in.
+          </p>
+        </div>
+
+        <Card variant="elevated" padding="spacious" className="animate-fade-up">
+          <div className="flex flex-col gap-4">
+            <Input
+              label="Your Name *"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              error={
+                hasAttemptedSubmit && !displayName.trim() ? "Required" : undefined
+              }
+            />
+            <div className="space-y-1">
+              <label className="block text-xs font-semibold text-curtain-700 tracking-wide">
+                Pronouns
+              </label>
+              <select
+                value={pronouns}
+                onChange={(e) => setPronouns(e.target.value as Pronouns | "")}
+                className="w-full px-3 py-2.5 text-sm rounded-xl border border-cream-300 bg-cream-50 outline-none focus:ring-2 focus:ring-curtain-200 focus:border-curtain-300"
+              >
+                <option value="">Select pronouns</option>
+                {PRONOUN_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="block text-xs font-semibold text-curtain-700 tracking-wide">
+                What you do at {invite.orgName}
+              </label>
+              <select
+                value={primaryRole}
+                onChange={(e) => setPrimaryRole(e.target.value)}
+                className="w-full px-3 py-2.5 text-sm rounded-xl border border-cream-300 bg-cream-50 outline-none focus:ring-2 focus:ring-curtain-200 focus:border-curtain-300"
+              >
+                {PRIMARY_ROLE_GROUPS.map((group) => (
+                  <optgroup key={group.group} label={group.group}>
+                    {group.options.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-8">
+            <button
+              type="button"
+              className="text-xs text-clay-500 hover:text-curtain-700 underline-offset-2 hover:underline text-left"
+              onClick={() => setDeclinedInviteFlow(true)}
+            >
+              Not here for {invite.orgName}? Set up as an actor or start your own theatre
+            </button>
+            <Button
+              onClick={submitInvited}
+              loading={invitedMutation.isPending}
+              icon={<ArrowRight className="w-4 h-4" weight="bold" />}
+            >
+              Join {invite.orgName}
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
   }
 
   // ════════════════════════════════════════════════

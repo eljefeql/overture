@@ -94,6 +94,31 @@ export async function completeActorOnboarding(input: {
 }
 
 /**
+ * Invited-person onboarding: the account was created from a theatre's
+ * invite, so there is no theatre to make and no actor profile to fill in.
+ * Saves name + pronouns, marks onboarding complete, then claims the
+ * invite(s) so the membership exists before /org loads. Returns the number
+ * of theatres joined (0 means the invite was already claimed or expired —
+ * the caller still lands on /org, which shows memberships honestly).
+ */
+export async function completeInvitedOnboarding(input: {
+  user: Pick<User, "id" | "displayName"> & { pronouns: Pronouns | null };
+}): Promise<number> {
+  const supabase = getSupabase();
+  const { user } = input;
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      display_name: user.displayName,
+      pronouns: user.pronouns,
+      onboarding_step: "complete",
+    })
+    .eq("id", user.id);
+  if (error) throw new Error(error.message);
+  return claimPendingInvites();
+}
+
+/**
  * Persist the theatre-maker onboarding wizard to Supabase:
  * orgs INSERT + org_members (owner) INSERT + profiles UPDATE.
  */
